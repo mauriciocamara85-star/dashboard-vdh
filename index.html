@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VDH / Control comercial</title>
+  <meta name="description" content="Dashboard comercial VDH para locales y e-commerce">
+  <meta name="theme-color" content="#0B1220">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="VDH Dashboard">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="stylesheet" href="styles.css?v=5">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-logo"><img class="logo-light" src="assets/vdh-logo.png" alt="VDH"><img class="logo-dark" src="assets/vdh-logo-dark.png" alt="VDH"></span><span class="brand-label">control<br><small>comercial</small></span></div>
+      <div class="live-state"><span class="pulse"></span><span id="connectionLabel">Sin conectar</span></div>
+      <nav class="nav" aria-label="Secciones">
+        <button class="nav-item active" data-view="overview"><span class="nav-index">01</span><span>Resumen general</span></button>
+        <button class="nav-item" data-view="stores"><span class="nav-index">02</span><span>Locales</span></button>
+        <button class="nav-item" data-view="ecommerce"><span class="nav-index">03</span><span>E-commerce</span></button>
+        <button class="nav-item" data-view="sellerMetrics"><span class="nav-index">04</span><span>Métricas<br>vendedores</span></button>
+        <button class="nav-item" data-view="accessories"><span class="nav-index">05</span><span>Accesorios</span></button>
+        <button class="nav-item" data-view="season"><span class="nav-index">06</span><span>Informe de<br>temporada</span></button>
+        <button class="nav-item" data-view="ranking"><span class="nav-index">07</span><span>Ranking</span></button>
+        <button class="nav-item" data-view="rentabilidad"><span class="nav-index">08</span><span>Rentabilidad</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="footer-meta"><span>VDH / semestre 26-27</span><span class="version">v0.1</span></div>
+        <div class="theme-toggle" role="group" aria-label="Tema visual">
+          <button type="button" class="theme-btn" data-theme-choice="dark" aria-pressed="true" title="Tema oscuro" aria-label="Tema oscuro"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg></button>
+          <button type="button" class="theme-btn" data-theme-choice="light" aria-pressed="false" title="Tema claro" aria-label="Tema claro"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="eyebrow">MONITOR DE PERFORMANCE <span class="slash">/</span> <span id="lastRefresh">sin datos</span></div>
+        <div class="top-actions"><span class="data-status" id="dataStatus">Esperando conexión</span><button class="icon-button" id="refreshButton" title="Actualizar datos" aria-label="Actualizar datos">↻</button></div>
+      </header>
+
+      <section class="filters" aria-label="Filtros globales">
+        <div class="filter-heading"><span class="section-kicker">FILTROS</span><button id="clearFilters" class="text-button">Limpiar todo</button></div>
+        <label id="localFilterLabel" hidden>Local<select id="localFilter"><option value="all">Todos los locales</option></select></label>
+        <label id="sellerFilterLabel" hidden>Vendedor<select id="sellerFilter"><option value="all">Todos los vendedores</option></select></label>
+        <div class="period-field" id="periodPickerField">
+          <span class="period-field-label">Período</span>
+          <button type="button" id="periodPickerBtn" class="period-trigger">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span id="periodPickerBtnText">Personalizado</span>
+            <svg class="icon-svg period-trigger-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="period-dropdown" id="periodDropdown" hidden>
+            <button type="button" class="period-preset" data-preset="hoy">Hoy</button>
+            <button type="button" class="period-preset" data-preset="ayer">Ayer</button>
+            <div class="period-group-label">Período actual</div>
+            <button type="button" class="period-preset period-preset-indent" data-preset="semana">Semana actual</button>
+            <button type="button" class="period-preset period-preset-indent" data-preset="mes">Mes actual</button>
+            <button type="button" class="period-preset period-preset-indent" data-preset="trimestre">Trimestre actual</button>
+          </div>
+        </div>
+        <div class="period-field" id="periodCustomField">
+          <span class="period-field-label">Período seleccionado</span>
+          <button type="button" id="periodCustomBtn" class="period-trigger">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span id="periodCustomBtnText">Elegí un rango</span>
+          </button>
+          <div class="period-dropdown period-calendar-dropdown" id="periodCalendarDropdown" hidden>
+            <div id="periodCalendar" class="period-calendar"></div>
+            <div class="period-custom-actions">
+              <button type="button" class="text-button" id="periodCancelBtn">Cancelar</button>
+              <button type="button" class="period-apply-btn" id="periodApplyBtn" disabled>Aplicar</button>
+            </div>
+          </div>
+        </div>
+        <input id="fromDate" type="date" hidden aria-hidden="true" tabindex="-1">
+        <input id="toDate" type="date" hidden aria-hidden="true" tabindex="-1">
+        <label id="metricsMonthLabel" hidden>Mes<select id="metricsMonthFilter"><option value="all">Todos los meses</option></select></label>
+        <label id="metricsWeekLabel" hidden>Semana<select id="metricsWeekFilter"><option value="all">Todas las semanas</option></select></label>
+        <label id="accessoryMonthLabel" hidden>Mes<select id="accessoryMonthFilter"><option value="all">Todos los meses</option></select></label>
+        <label id="accessoryWeekLabel" hidden>Semana<select id="accessoryWeekFilter"><option value="all">Todas las semanas</option></select></label>
+        <div id="periodRangeBadge" class="period-range-badge" hidden></div>
+      </section>
+
+      <div id="errorBanner" class="error-banner" hidden></div>
+
+      <section id="overviewView" class="view active-view">
+        <div class="view-heading"><div><span class="section-kicker">01 / PULSO GENERAL</span><span class="live-updated" id="overviewUpdated"></span><h1 id="overviewGreeting">El negocio, de un vistazo.</h1><p>Locales y canal online en una misma lectura. Los objetivos se miden contra lo esperado a la fecha.</p></div><div class="period-badge" id="periodBadge">Sin período</div></div>
+        <div class="metric-grid" id="overviewMetrics"></div>
+        <div class="split-grid">
+          <article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">TENDENCIA REAL VS PROYECTADO</span><h2>Real vs. objetivo</h2></div><span class="panel-note">línea acumulada a la fecha</span></div><div id="salesBars" class="bar-chart empty-state">Conectá la fuente para ver el ritmo.</div></article>
+          <article class="panel panel-fill"><div class="panel-head"><div><span class="section-kicker">RESUMEN EJECUTIVO</span><h2>Cómo viene el negocio</h2></div></div><div id="deviationCard" class="deviation-card empty-state">Esperando datos</div></article>
+        </div>
+        <article class="panel panel-large panel-standalone"><div class="panel-head"><div><span class="section-kicker">DÍA A DÍA</span><h2>Venta real vs. objetivo del día</h2></div><span class="panel-note">qué días específicos fallaron</span></div><div id="dailyComparisonChart" class="bar-chart bar-chart-compact empty-state">Conectá la fuente para ver el detalle diario.</div></article>
+        <div class="split-grid lower-grid">
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">LOCALES</span><h2>Salud de los locales</h2></div><button class="text-button jump-view" data-view="stores">Ver detalle →</button></div><div id="storeHealth" class="team-health empty-state">Sin datos</div></article>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">EQUIPO</span><h2>Salud del equipo de venta</h2></div><button class="text-button jump-view" data-view="sellerMetrics">Ver detalle →</button></div><div id="teamHealth" class="team-health empty-state">Sin datos</div></article>
+        </div>
+      </section>
+
+      <section id="storesView" class="view"><div class="view-heading"><div><span class="section-kicker">02 / RED FÍSICA</span><h1>Locales.</h1><p>Venta, tráfico y conversión por día, con el desvío calculado sobre el objetivo que correspondía.</p></div></div><div class="rank-tabs" id="storeViewTabs" role="tablist" aria-label="Vista"><button class="rank-tab active" data-tab="resumen">Resumen</button><button class="rank-tab" data-tab="foco">Foco</button></div>
+        <div id="storeResumenPanel">
+          <div class="store-kpi-grid" id="storeKpiGrid">
+            <button class="store-kpi-card active" data-store-metric="venta" type="button"><span class="store-kpi-index">01</span><span class="store-kpi-label">Venta vs. Objetivo</span><span class="store-kpi-value" id="storeKpiValue-venta">—</span><span class="store-kpi-sub" id="storeKpiSub-venta"></span></button>
+            <button class="store-kpi-card" data-store-metric="proyeccion" type="button"><span class="store-kpi-index">02</span><span class="store-kpi-label">Proyección de Cierre</span><span class="store-kpi-value" id="storeKpiValue-proyeccion">—</span><span class="store-kpi-sub" id="storeKpiSub-proyeccion"></span></button>
+            <button class="store-kpi-card" data-store-metric="conversion" type="button"><span class="store-kpi-index">03</span><span class="store-kpi-label">Conversión %</span><span class="store-kpi-value" id="storeKpiValue-conversion">—</span><span class="store-kpi-sub" id="storeKpiSub-conversion"></span></button>
+            <button class="store-kpi-card" data-store-metric="ticket" type="button"><span class="store-kpi-index">04</span><span class="store-kpi-label">Ticket Promedio $</span><span class="store-kpi-value" id="storeKpiValue-ticket">—</span><span class="store-kpi-sub" id="storeKpiSub-ticket"></span></button>
+            <button class="store-kpi-card" data-store-metric="trafico" type="button"><span class="store-kpi-index">05</span><span class="store-kpi-label">Tráfico</span><span class="store-kpi-value" id="storeKpiValue-trafico">—</span><span class="store-kpi-sub" id="storeKpiSub-trafico"></span></button>
+            <button class="store-kpi-card" data-store-metric="pagos" type="button"><span class="store-kpi-index">06</span><span class="store-kpi-label">Medios de Pago</span><span class="store-kpi-value" id="storeKpiValue-pagos">—</span><span class="store-kpi-sub" id="storeKpiSub-pagos"></span></button>
+          </div>
+          <article class="panel panel-standalone" id="storeChartPanel"><div class="panel-head"><div><span class="section-kicker" id="storeChartKicker">VENTA VS. OBJETIVO</span><h2 id="storeChartHeading">Venta real vs. objetivo, por día</h2></div></div><div id="storeChartArea"></div></article>
+          <div class="split-grid lower-grid"><article class="panel panel-flex"><div class="panel-head"><div><span class="section-kicker">EMBUDO DEL LOCAL</span><h2>Tráfico → venta</h2></div></div><div id="storeFunnel" class="funnel empty-state">Sin datos</div></article><article class="panel panel-flex"><div class="panel-head"><div><span class="section-kicker">DIAGNÓSTICO</span><h2>Dónde está la falla</h2></div></div><div id="storeDiagnosis" class="store-diagnosis empty-state">Sin datos</div></article></div>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE DIARIO</span><h2>Performance por fecha</h2></div><span id="storeRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="storeTable" class="table-wide"></table></div></article>
+        </div>
+        <article class="panel" id="storeFocusPanel" hidden><div class="panel-head"><div><span class="section-kicker">FOCO POR LOCAL</span><h2>Qué variable está fallando en cada local</h2></div><span id="storeFocusRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="storeFocusTable" class="table-wide"></table></div></article>
+      </section>
+
+      <section id="ecommerceView" class="view"><div class="view-heading"><div><span class="section-kicker">03 / CANAL ONLINE</span><h1>E-commerce.</h1><p>El día a día del canal, con embudo y eficiencia de inversión sin impuestos.</p></div><div class="roas-badge">BE ROAS <strong>2.8</strong></div></div><div class="metric-grid" id="ecomMetrics"></div><div class="split-grid"><article class="panel"><div class="panel-head"><div><span class="section-kicker">EMBUDO</span><h2>De visita a compra</h2></div></div><div class="funnel" id="funnel"></div></article><article class="panel"><div class="panel-head"><div><span class="section-kicker">META ADS</span><h2>Inversión y retorno</h2></div></div><div id="adsSummary" class="ads-summary empty-state">Sin datos</div></article></div><div class="split-grid lower-grid"><article class="panel"><div class="panel-head"><div><span class="section-kicker">MÉTRICAS DEL MES</span><h2>Real vs. objetivo</h2></div></div><div class="table-wrap"><table id="ecomMonthTable"></table></div></article><article class="panel"><div class="panel-head"><div><span class="section-kicker">PROYECCIÓN</span><h2>Cierre estimado del mes</h2></div></div><div id="ecomProjection" class="deviation-card empty-state">Esperando datos</div></article></div><article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE DIARIO</span><h2>Venta y visitas</h2></div></div><div class="table-wrap"><table id="ecomTable" class="table-wide"></table></div></article></section>
+
+      <section id="sellerMetricsView" class="view"><div class="view-heading"><div><span class="section-kicker">04 / EFICIENCIA COMERCIAL</span><h1>Métricas por vendedor.</h1><p>Detalle de venta, tráfico y productividad por persona.</p></div></div><div class="rank-tabs" id="sellerViewTabs" role="tablist" aria-label="Vista"><button class="rank-tab active" data-tab="resumen">Resumen</button><button class="rank-tab" data-tab="foco">Foco</button></div>
+        <div id="sellerResumenPanel"><div class="metric-grid" id="sellerDetailMetrics"></div><div class="split-grid lower-grid"><article class="panel panel-flex"><div class="panel-head"><div><span class="section-kicker">EMBUDO POR VENDEDOR</span><h2>Tráfico → venta</h2></div></div><div id="sellerFunnel" class="funnel empty-state">Sin datos</div></article><article class="panel panel-flex"><div class="panel-head"><div><span class="section-kicker">DIAGNÓSTICO</span><h2>Dónde está la falla</h2></div></div><div id="sellerDiagnosis" class="store-diagnosis empty-state">Sin datos</div></article></div><article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE INDIVIDUAL</span><h2>Cómo está vendiendo cada vendedor</h2></div><span id="sellerDetailRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="sellerDetailTable" class="table-wide"></table></div></article></div>
+        <article class="panel" id="sellerFocusPanel" hidden><div class="panel-head"><div><span class="section-kicker">FOCO POR VENDEDOR</span><h2>Qué variable está fallando en cada persona</h2></div><span id="sellerFocusRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="sellerFocusTable" class="table-wide"></table></div></article>
+      </section>
+      <section id="accessoriesView" class="view"><div class="view-heading"><div><span class="section-kicker">05 / PRODUCTOS COMPLEMENTARIOS</span><h1>Venta de accesorios.</h1><p>Perfumes y Boxers contra el objetivo semanal de cada vendedor.</p></div></div><div class="metric-grid" id="accessoryMetrics"></div><article class="panel accessory-panel"><div class="panel-head"><div><span class="section-kicker">PERFUMES Y BOXERS</span><h2>Objetivo, venta y desvío</h2></div><span id="accessoryRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="accessoryTable" class="table-wide"></table></div></article></section>
+      <section id="seasonView" class="view"><div class="view-heading"><div><span class="section-kicker">06 / INFORME DE TEMPORADA</span><h1>La temporada, en un vistazo.</h1><p>Acumulado del semestre mes a mes, con ranking y focos de atención. Se completa sola a medida que se cargan más meses.</p></div></div><div class="metric-grid" id="seasonMetrics"></div><div class="split-grid"><article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">VENTAS POR MES</span><h2>Con acumulado corrido</h2></div></div><div class="table-wrap"><table id="seasonMonthTable"></table></div></article><article class="panel"><div class="panel-head"><div><span class="section-kicker">FOCO</span><h2>Del semestre</h2></div></div><div id="seasonFocus" class="season-focus empty-state">Sin datos</div></article></div><article class="panel panel-large panel-standalone"><div class="panel-head"><div><span class="section-kicker">TENDENCIA SEMESTRAL</span><h2>Venta real vs. objetivo esperado, mes a mes</h2></div></div><div id="seasonTrendChart" class="bar-chart empty-state">Sin datos</div></article><div class="split-grid lower-grid"><article class="panel"><div class="panel-head"><div><span class="section-kicker">TRÁFICO · CONVERSIÓN · TICKET</span><h2>Por mes</h2></div></div><div class="table-wrap"><table id="seasonTrafficTable"></table></div></article><article class="panel"><div class="panel-head"><div><span class="section-kicker">RANKING</span><h2>Semestral</h2></div></div><div class="table-wrap"><table id="seasonRankingTable"></table></div></article></div></section>
+      <section id="rankingView" class="view"><div class="view-heading"><div><span class="section-kicker">07 / GAMIFICACIÓN</span><h1>Quién más mejoró.</h1><p>Un ranking por categoría, no solo por volumen — cada vendedor o local puede destacarse en el suyo.</p></div><div class="period-badge" id="rankingPeriodBadge">Sin semana</div></div><div class="rank-tabs" id="rankScopeTabs" role="tablist" aria-label="Vista"><button class="rank-tab active" data-scope="liga">Liga VDH</button><button class="rank-tab" data-scope="campeonato">GP VDH</button><button class="rank-tab" data-scope="sprints">Sprints VDH</button><button class="rank-tab" data-scope="mejora">Mayor Mejora</button><button class="rank-tab" data-scope="stores">Locales</button><button class="rank-tab" data-scope="evolution">Evolución</button><button class="rank-tab" data-scope="reglas">Reglamento GP</button></div>
+        <div id="rankSellersPanel"><div class="sprint-picker" id="sprintPicker" hidden><label for="sprintCategorySelect">Categoría Sprint</label><select id="sprintCategorySelect"><option value="ticket">Ticket Promedio</option><option value="perfumes">Perfumes</option><option value="boxer">Boxer</option><option value="pxt">PxT</option></select></div><div class="metric-grid" id="rankingMetrics"></div><article class="panel"><div class="panel-head"><div><span class="section-kicker" id="rankingKicker">OBJETIVO SEMANAL</span><h2 id="rankingHeading">Ranking general por % de cumplimiento de objetivo</h2></div><div class="panel-head-right"><div class="rank-sort-toggle" id="rankSortToggle" hidden role="group" aria-label="Ordenar por"><button class="rank-tab-sm active" data-sort="units">Cantidad</button><button class="rank-tab-sm" data-sort="ratio">% Objetivo</button></div><span id="rankingRowsCount" class="panel-note"></span></div></div><div class="table-wrap"><table id="rankingTable" class="table-wide"></table></div></article><p class="panel-note-inline" id="rankingFootnote" hidden></p></div>
+        <div id="rankStoresPanel" hidden><div class="metric-grid" id="storeRankMetrics"></div><article class="panel"><div class="panel-head"><div><span class="section-kicker">MEJORA SEMANAL · LOCALES</span><h2>Todos los locales</h2></div><span id="storeRankRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="storeRankTable" class="table-wide"></table></div></article></div>
+        <div id="rankBadgesPanel" hidden>
+          <div class="metric-grid" id="badgesMetrics"></div>
+          <div class="split-grid lower-grid">
+            <article class="panel"><div class="panel-head"><div><span class="section-kicker">GANADORES</span><h2>De la semana</h2></div></div><div id="badgesWinners" class="badge-panel empty-state">Sin datos</div></article>
+            <article class="panel"><div class="panel-head"><div><span class="section-kicker">RACHA</span><h2>En objetivo semana tras semana</h2></div></div><div id="badgesStreaks" class="badge-panel empty-state">Sin datos</div></article>
+          </div>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">RÉCORDS PERSONALES</span><h2>Mejor marca propia</h2></div></div><div id="badgesRecords" class="badge-panel empty-state">Sin datos</div></article>
+        </div>
+        <div id="rankEvolutionPanel" hidden>
+          <div class="rank-sort-toggle" id="evolutionScopeToggle" role="group" aria-label="Evolución de"><button class="rank-tab-sm active" data-evoscope="seller">Vendedor</button><button class="rank-tab-sm" data-evoscope="local">Local</button></div>
+          <div id="evolutionEmpty" class="empty-state">Elegí un vendedor en el filtro "Vendedor" de arriba para ver su evolución semanal.</div>
+          <div id="evolutionContent" hidden>
+            <div class="panel-head"><div><span class="section-kicker">EVOLUCIÓN SEMANAL</span><h2 id="evolutionHeading">Vendedor</h2></div></div>
+            <div class="metric-grid" id="evolutionMetrics"></div>
+            <div class="split-grid">
+              <article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">% CUMPLIMIENTO</span><h2>Por semana</h2></div></div><div id="evolutionChart" class="bar-chart"></div></article>
+              <article class="panel"><div class="panel-head"><div><span class="section-kicker">HITOS</span><h2>De este vendedor</h2></div></div><div id="evolutionBadges" class="badge-panel empty-state">Sin datos</div></article>
+            </div>
+            <article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE</span><h2>Semana a semana</h2></div></div><div class="table-wrap"><table id="evolutionTable" class="table-wide"></table></div></article>
+          </div>
+        </div>
+        <div id="rankGpPanel" hidden>
+          <div class="metric-grid" id="gpMetrics"></div>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">ACUMULADO DEL MES</span><h2>Campeonato del mes · Carrera Principal + Sprints VDH</h2></div><span id="gpRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="gpTable" class="table-wide"></table></div></article>
+        </div>
+        <div id="rankReglasPanel" hidden class="reglas-grid">
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker"><svg class="kicker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>CARRERA PRINCIPAL</span><h2>Liga VDH · Venta general</h2></div></div><p class="reglas-copy">Premia el % de cumplimiento sobre el objetivo individual de venta. Otorga puntos GP VDH al Top 10 de cada fecha (semana).</p><div class="reglas-points"><div class="reglas-point top"><span class="pos">1°</span><strong>25</strong></div><div class="reglas-point top"><span class="pos">2°</span><strong>18</strong></div><div class="reglas-point top"><span class="pos">3°</span><strong>15</strong></div><div class="reglas-point"><span class="pos">4°</span><strong>12</strong></div><div class="reglas-point"><span class="pos">5°</span><strong>10</strong></div><div class="reglas-point"><span class="pos">6°</span><strong>8</strong></div><div class="reglas-point"><span class="pos">7°</span><strong>6</strong></div><div class="reglas-point"><span class="pos">8°</span><strong>4</strong></div><div class="reglas-point"><span class="pos">9°</span><strong>2</strong></div><div class="reglas-point"><span class="pos">10°</span><strong>1</strong></div></div></article>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker"><svg class="kicker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>CARRERAS SPRINT</span><h2>Perfumes · Boxer · PxT · Ticket promedio</h2></div></div><p class="reglas-copy">Mide el % de cumplimiento sobre objetivo en cada producto o métrica específica. Otorga puntos Sprint al Top 8 de cada categoría, por fecha.</p><div class="reglas-points"><div class="reglas-point top"><span class="pos">1°</span><strong>8</strong></div><div class="reglas-point top"><span class="pos">2°</span><strong>7</strong></div><div class="reglas-point top"><span class="pos">3°</span><strong>6</strong></div><div class="reglas-point"><span class="pos">4°</span><strong>5</strong></div><div class="reglas-point"><span class="pos">5°</span><strong>4</strong></div><div class="reglas-point"><span class="pos">6°</span><strong>3</strong></div><div class="reglas-point"><span class="pos">7°</span><strong>2</strong></div><div class="reglas-point"><span class="pos">8°</span><strong>1</strong></div></div></article>
+          <article class="panel reglas-panel-simple"><div class="panel-head"><div><span class="section-kicker"><svg class="kicker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4a2 2 0 0 0 0 4h3"/><path d="M17 5h3a2 2 0 0 1 0 4h-3"/></svg>GRAN PREMIO MENSUAL</span><h2>GP VDH</h2></div></div><p class="reglas-copy">Todos los puntos de la Carrera Principal + las Carreras Sprint se acumulan automáticamente fecha a fecha durante las 4 fechas del mes. El vendedor con más puntos acumulados al cierre del mes se corona <strong>Campeón del GP VDH</strong>.</p></article>
+          <article class="panel reglas-panel-simple reglas-panel-cash"><div class="panel-head"><div><span class="section-kicker"><svg class="kicker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/></svg>PREMIOS SEMANALES</span><h2>Premios en efectivo</h2></div></div><p class="reglas-copy">Se otorgan semanalmente al Podio General (1°, 2° y 3° puesto) y al ganador de la <strong>Mayor Mejora VDH</strong>. Los puntos acumulados para el GP VDH son independientes del premio económico semanal — corren en paralelo.</p></article>
+        </div>
+      </section>
+      <section id="rentabilidadView" class="view"><div class="view-heading"><div><span class="section-kicker">08 / RESULTADO ECONÓMICO</span><h1>Rentabilidad por local.</h1><p>Venta, gastos, CMV y rentabilidad de cada local en un mismo tablero.</p></div></div>
+        <div class="demo-banner"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> Vista en preparación con <strong>datos de ejemplo</strong>, calculados a partir de la Venta real ya cargada. Se reemplazan por los reales apenas el equipo cree la pestaña "Verano 2027" en la planilla de referencia (Power BI) y se conecte el Apps Script.</div>
+        <div class="metric-grid" id="rentabilidadMetrics"></div>
+        <article class="panel"><div class="panel-head"><div><span class="section-kicker">POR LOCAL</span><h2>Venta, gastos y rentabilidad</h2></div><span id="rentabilidadRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="rentabilidadTable" class="table-wide"></table></div></article>
+      </section>
+      <footer class="app-footer">VDH / datos consolidados desde Google Sheets <span id="footerUpdated"></span></footer>
+    </main>
+  </div>
+  <!-- ── NAVEGACIÓN MÓVIL ESTILO TIENDANUBE (< 768px) ─────────────
+       Reemplaza el .nav horizontal-scroll de la sidebar solo en mobile — .nav sigue existiendo tal
+       cual para desktop/tablet (≥768px), no se duplica lógica: mismos data-view, mismo switchView(). -->
+  <nav class="bottom-nav" id="bottomNav" aria-label="Navegación principal">
+    <button class="bottom-nav-item active" data-view="overview" type="button">
+      <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      <span class="bottom-nav-label">Inicio</span>
+    </button>
+    <button class="bottom-nav-item" data-view="stores" type="button">
+      <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1-5h16l1 5"/><path d="M3 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0"/><path d="M4 9v10h16V9"/><path d="M9 21v-6h6v6"/></svg>
+      <span class="bottom-nav-label">Locales</span>
+    </button>
+    <button class="bottom-nav-item" data-view="sellerMetrics" type="button">
+      <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span class="bottom-nav-label">Vendedores</span>
+    </button>
+    <button class="bottom-nav-item" id="mainDrawerToggle" type="button" aria-haspopup="true" aria-expanded="false">
+      <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+      <span class="bottom-nav-label">Más</span>
+    </button>
+  </nav>
+
+  <div class="drawer-backdrop" id="mainDrawerBackdrop" hidden></div>
+  <div class="drawer-panel" id="mainDrawerPanel" hidden role="dialog" aria-label="Menú completo">
+    <div class="drawer-head">
+      <span>Menú completo</span>
+      <button class="drawer-close" id="mainDrawerClose" type="button" aria-label="Cerrar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="drawer-body">
+      <div class="drawer-group">
+        <span class="drawer-group-title">Gestión</span>
+        <button class="drawer-item" data-drawer-view="ecommerce"><svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>E-commerce</button>
+        <button class="drawer-item" data-drawer-view="accessories"><svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.59 2.41 20 9.83a2 2 0 0 1 0 2.83l-7.17 7.17a2 2 0 0 1-2.83 0L2.41 12.24a2 2 0 0 1 0-2.83L9.83 2.41a2 2 0 0 1 2.83 0Z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/></svg>Accesorios</button>
+      </div>
+      <div class="drawer-group">
+        <span class="drawer-group-title">Análisis</span>
+        <button class="drawer-item" data-drawer-view="season"><svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>Informe de Temporada</button>
+        <button class="drawer-item" data-drawer-view="ranking"><svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>Ranking · GP VDH</button>
+        <button class="drawer-item" data-drawer-view="rentabilidad"><svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/></svg>Rentabilidad</button>
+      </div>
+      <div class="drawer-group">
+        <span class="drawer-group-title">Configuración</span>
+        <div class="drawer-theme-row">
+          <span class="drawer-item-label"><svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>Tema</span>
+          <div class="theme-toggle" role="group" aria-label="Tema visual (menú)">
+            <button type="button" class="theme-btn" data-theme-choice="dark" title="Tema oscuro" aria-label="Tema oscuro"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg></button>
+            <button type="button" class="theme-btn" data-theme-choice="light" title="Tema claro" aria-label="Tema claro"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
