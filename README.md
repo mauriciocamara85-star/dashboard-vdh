@@ -1,6 +1,11 @@
 # VDH / Dashboard comercial
 
-Dashboard estático para Netlify. Consume las seis tablas planas del endpoint de Apps Script.
+Dashboard estático. Consume las seis tablas planas del endpoint de Apps Script.
+
+El ranking del equipo vive aparte, en su propio repo: [ranking-vdh](https://github.com/mauriciocamara85-star/ranking-vdh)
+(publicado en https://mauriciocamara85-star.github.io/ranking-vdh/) — antes era la carpeta
+`/equipo/` de este repo, se separó para que cada PWA tenga su propio `scope` y se pueda instalar
+en el celular sin que una tape a la otra.
 
 ## Uso local
 
@@ -8,7 +13,8 @@ Abrir `index.html` en un navegador. Pegar la URL `/exec` del endpoint en la barr
 
 ## Publicación
 
-Subir la carpeta completa a Netlify como sitio estático (`index.html`, `styles.css`, `app.js`, `manifest.json`, `sw.js`, íconos, `assets/` y `equipo/`). No hace falta subir `.claude/` ni este `README.md`.
+GitHub Pages, rama `main`, carpeta raíz. Publicado en https://mauriciocamara85-star.github.io/dashboard-vdh/.
+Cada `git push` a `main` republica el sitio solo, en 1-2 minutos.
 
 ## Fuente
 
