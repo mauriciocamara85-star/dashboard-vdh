@@ -1373,7 +1373,12 @@ function priorSemesterSeries(thisSemesterStartRef){
 // sin declarar en renderDeviation() — ese era el ReferenceError que rompía toda la carga).
 function monthContext(){
   const localMonth=(state.tables.LOCAL_DIARIO||[])[0]?.Mes||'';
-  const localRows=overviewRows('LOCAL_DIARIO');
+  // No usar overviewRows() acá: aplica el filtro de fecha del "Período" de arriba, y este objetivo
+  // tiene que ser el del MES COMPLETO sin importar qué rango de fechas esté seleccionado (mismo
+  // criterio que ecomRows, una línea abajo) — si no, elegir un solo día encoge el objetivo del mes
+  // a ese único día (bug real detectado en conversación del 2026-09-02: "objetivo total" mostraba
+  // $14,9M en vez de ~$200M+ al filtrar por 01/09 nada más).
+  const localRows=(state.tables.LOCAL_DIARIO||[]).filter(row=>!localMonth||String(row.Mes??'')===localMonth);
   const ecomRows=(state.tables.ECOM_DIARIO||[]).filter(row=>!localMonth||String(row.Mes??'')===localMonth);
   const monthRows=[...localRows,...ecomRows];
   return{localMonth,monthRows,monthTarget:aggregate(monthRows).target};
