@@ -334,11 +334,59 @@ function weekKeyOf(row){return `${String(row?.Mes??'').trim()}|${String(row?.Sem
 function weekKeyOrder(key){const [mes,semana]=key.split('|');return MONTH_ORDER.indexOf(mes)*10+Number(semana)}
 function medalFor(i){if(i>2)return'';const tier=i===0?'gold':i===1?'silver':'bronze';return icon('medal',`medal-${tier}`)}
 function rankPos(i){const m=medalFor(i);return `<span class="rank-pos">${m?`<span class="rank-medal">${m}</span>`:''}${i+1}</span>`}
+// ── Vendedores que cubren más de un local (cobertura) ─────────────────────────────────────────
+// El consolidador NO funde estas filas: cada local sigue viendo su propia venta real completa esa
+// semana (así todo lo que rankea LOCALES —renderRankStores, mejoraLeaderStore, storeHealth, etc.—
+// sigue viendo el total correcto de cada sucursal, sin perder nada). Acá SÍ se funden, pero solo
+// para lo que rankea PERSONAS (Liga VDH, Sprints, GP VDH, Mayor Mejora, Métricas por vendedor,
+// Accesorios, Temporada y Evolución): si el mismo nombre aparece en más de un Local dentro de la
+// MISMA semana (Mes+Semana), se asume que es la misma persona cubriendo y se funden esas filas en
+// una sola — bug real reportado el 2026-09-05 (una persona con dos locales aparecía partida en dos
+// filas, cada una con la mitad de su venta y objetivo). Mismo criterio ya aplicado en el repo
+// hermano ranking-vdh (ver fusionarCompartidos allá). Automático por nombre+apellido, sin lista
+// manual a mantener: el equipo ya carga nombre+apellido en VENDEDOR_SEMANAL específicamente para
+// que el nombre alcance como identidad única. Único riesgo real: si dos personas DISTINTAS
+// compartieran nombre y apellido exacto en dos locales sin relación, se fundirían por error —
+// poco probable con nombre+apellido siempre cargado, pero si pasa hay que volver a algo explícito.
+function fusionarVendedoresCompartidos(rows){
+  const grupos={},resto=[];
+  rows.forEach(row=>{
+    const key=`${row.Vendedor}|${weekKeyOf(row)}`;
+    if(!grupos[key])grupos[key]=[];
+    grupos[key].push(row);
+  });
+  Object.values(grupos).forEach(partes=>{
+    const localesDistintos=[...new Set(partes.map(r=>r.Local))];
+    if(localesDistintos.length===1){partes.forEach(p=>resto.push(p));return} // un solo local esa semana: nada que fundir
+    const sumaCol=campo=>partes.reduce((s,r)=>s+num(r,campo),0);
+    // TP/PxT/Conv son promedios, no cantidades — sumarlos infla el número. Se recalculan
+    // ponderados por su propio peso natural: Conversión por Tráfico real, TP y PxT por Venta
+    // (real u obj según corresponda) — mismo criterio que ranking-vdh.
+    const promedioCol=(campo,pesoCampo)=>{const peso=sumaCol(pesoCampo);return peso?partes.reduce((s,r)=>s+num(r,campo)*num(r,pesoCampo),0)/peso:0};
+    const base={...partes[0]};
+    base.Local=localesDistintos.sort().join(' + ');
+    ['Venta obj','Venta real','Tráfico real','Perfumes obj','Perfumes real','Boxer obj','Boxer real'].forEach(c=>{base[c]=sumaCol(c)});
+    base['Conv real']=promedioCol('Conv real','Tráfico real');
+    base['TP obj']=promedioCol('TP obj','Venta obj');
+    base['TP real']=promedioCol('TP real','Venta real');
+    base['PxT obj']=promedioCol('PxT obj','Venta obj');
+    base['PxT real']=promedioCol('PxT real','Venta real');
+    resto.push(base);
+  });
+  return resto;
+}
 function currentWeekRows(){
   const local=$('localFilter').value,seller=$('sellerFilter').value;
   const rows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>(local==='all'||String(row.Local??'')===local)&&(seller==='all'||String(row.Vendedor??'')===seller));
   const weekKeys=[...new Set(rows.map(weekKeyOf))].sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b));
   return {rows,weekKeys};
+}
+// Misma base que currentWeekRows(), pero con las filas ya fundidas por vendedor compartido — usarla
+// en TODO lo que rankee PERSONAS (Liga, Sprints, Mejora). Lo que rankea LOCALES sigue usando
+// currentWeekRows() crudo a propósito (ver comentario de fusionarVendedoresCompartidos arriba).
+function currentWeekRowsPersonas(){
+  const {rows,weekKeys}=currentWeekRows();
+  return {rows:fusionarVendedoresCompartidos(rows),weekKeys};
 }
 function showRankingEmpty(){
   $('rankingPeriodBadge').textContent='Sin semana';
@@ -363,7 +411,10 @@ const F1_MAIN_POINTS=[25,18,15,12,10,8,6,4,2,1];
 const F1_SPRINT_POINTS=[8,7,6,5,4,3,2,1];
 const F1_SPRINT_FIELDS={ticket:'TP',perfumes:'Perfumes',boxer:'Boxer',pxt:'PxT'};
 function f1AllWeekKeys(){const rows=state.tables.VENDEDOR_SEMANAL||[];return[...new Set(rows.map(weekKeyOf))].sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b))}
-function f1WeekRows(weekKey){return(state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey)}
+// Fundida siempre: f1WeekRows solo se usa para puntajes de PERSONAS (Liga/Sprints/GP VDH), nunca
+// para rankear locales, así que no hace falta una variante "cruda" acá como currentWeekRows/
+// currentWeekRowsPersonas.
+function f1WeekRows(weekKey){return fusionarVendedoresCompartidos((state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey))}
 // Empates: si dos personas quedan exactamente igual en % de cumplimiento, la posición (y los
 // puntos F1/Sprint que reparte esa posición) se define por mayor venta/unidad absoluta real y,
 // si también empatan ahí, alfabético — determinístico siempre, nunca "quien cargó primero en la
@@ -380,14 +431,19 @@ function buildGrandPrixStandings(){
   const month=weeks[weeks.length-1].split('|')[0];
   const monthWeeks=weeks.filter(k=>k.split('|')[0]===month);
   const totals={};
-  const ensure=(local,name)=>{const key=`${local}|${name}`;if(!totals[key])totals[key]={local,name,main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[key]};
+  // Se acumula por NOMBRE solo, no por Local+Nombre: si una persona cubrió dos locales una semana
+  // del mes y solo uno otra semana, su etiqueta de Local fundida (ver fusionarVendedoresCompartidos)
+  // puede variar semana a semana — con la clave vieja `${local}|${name}` eso partía sus puntos del
+  // mes en dos "pilotos" distintos. `locales` junta la unión de todos los locales que pisó en el
+  // mes para mostrarla en la tabla (bug real, auditoría 2026-09-05).
+  const ensure=name=>{if(!totals[name])totals[name]={name,locales:new Set(),main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[name]};
   monthWeeks.forEach(weekKey=>{
-    f1RatioStandings(weekKey,null).slice(0,10).forEach((p,i)=>{ensure(p.local,p.name).main+=F1_MAIN_POINTS[i]});
+    f1RatioStandings(weekKey,null).slice(0,10).forEach((p,i)=>{const e=ensure(p.name);e.main+=F1_MAIN_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
     Object.entries(F1_SPRINT_FIELDS).forEach(([cat,field])=>{
-      f1RatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.local,p.name);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i]});
+      f1RatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.name);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
     });
   });
-  const list=Object.values(totals).map(e=>({...e,total:e.main+e.sprint}));
+  const list=Object.values(totals).map(e=>({...e,local:[...e.locales].sort().join(' + '),total:e.main+e.sprint}));
   list.sort((a,b)=>(b.total-a.total)||(b.main-a.main)||String(a.name).localeCompare(String(b.name),'es'));
   return{list,month,weeks:monthWeeks};
 }
@@ -404,7 +460,10 @@ function renderRankGrandPrix(){
   if(!list.length){showRankGrandPrixEmpty();return}
 
   const local=$('localFilter').value,seller=$('sellerFilter').value;
-  const filtered=list.filter(p=>(local==='all'||String(p.local??'')===local)&&(seller==='all'||String(p.name??'')===seller));
+  // p.local puede ser "San Justo 1 + Flores" para alguien que cubrió los dos ese mes — comparar con
+  // === contra el Local elegido lo hubiera dejado afuera del filtro aunque sí sumó puntos ahí ese
+  // mes. p.locales (el Set sin unir) permite ver si el local elegido es UNO de los suyos.
+  const filtered=list.filter(p=>(local==='all'||p.locales.has(local))&&(seller==='all'||String(p.name??'')===seller));
   const leader=list[0];
   const totalPts=list.reduce((sum,p)=>sum+p.total,0);
 
@@ -532,15 +591,25 @@ function renderRankStores(){
 }
 function vendorHistory(){
   const local=$('localFilter').value,seller=$('sellerFilter').value;
-  const rows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>(local==='all'||String(row.Local??'')===local)&&(seller==='all'||String(row.Vendedor??'')===seller));
+  const rawRows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>(local==='all'||String(row.Local??'')===local)&&(seller==='all'||String(row.Vendedor??'')===seller));
+  // Fundida por vendedor compartido (ver fusionarVendedoresCompartidos) y agrupada por nombre solo:
+  // antes, alguien que cubrió 2 locales en alguna semana quedaba con DOS historiales separados
+  // ("Juan Perez" en San Justo 1 y "Juan Perez" en Flores), lo que además disparaba el aviso
+  // "vendedores ambiguos, elegí un Local" de renderEvolutionSeller para una persona real (bug real,
+  // auditoría 2026-09-05). `locales` junta la unión de todos los locales vistos en el período para
+  // mostrarla en el encabezado de Evolución.
+  const rows=fusionarVendedoresCompartidos(rawRows);
   const groups={};
   rows.forEach(row=>{
-    const key=`${row.Local}|${row.Vendedor}`,obj=num(row,'Venta obj');
-    if(!groups[key])groups[key]={local:row.Local,name:row.Vendedor,weeks:[]};
+    const key=row.Vendedor,obj=num(row,'Venta obj');
+    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),weeks:[]};
+    row.Local.split(' + ').forEach(l=>groups[key].locales.add(l));
     groups[key].weeks.push({weekKey:weekKeyOf(row),ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:num(row,'Conv real'),pxt:num(row,'PxT real')});
   });
-  Object.values(groups).forEach(g=>g.weeks.sort((a,b)=>weekKeyOrder(a.weekKey)-weekKeyOrder(b.weekKey)));
-  return Object.values(groups);
+  return Object.values(groups).map(g=>{
+    g.weeks.sort((a,b)=>weekKeyOrder(a.weekKey)-weekKeyOrder(b.weekKey));
+    return{local:[...g.locales].sort().join(' + '),name:g.name,weeks:g.weeks};
+  });
 }
 function localHistory(){
   const local=$('localFilter').value,seller=$('sellerFilter').value;
@@ -584,7 +653,7 @@ function personalRecords(weeks){
   return result;
 }
 function categoryWinnersThisWeek(){
-  const {rows,weekKeys}=currentWeekRows();
+  const {rows,weekKeys}=currentWeekRowsPersonas();
   if(!weekKeys.length)return{winners:[]};
   const currentKey=weekKeys[weekKeys.length-1];
   const weekRows=rows.filter(row=>weekKeyOf(row)===currentKey);
@@ -601,21 +670,23 @@ function categoryWinnersThisWeek(){
   return{winners};
 }
 function mejoraLeaderSeller(){
-  const {rows,weekKeys}=currentWeekRows();
+  const {rows,weekKeys}=currentWeekRowsPersonas();
   if(weekKeys.length<2)return null;
   const currentKey=weekKeys[weekKeys.length-1],prevKey=weekKeys[weekKeys.length-2];
   const byPerson={};
   rows.forEach(row=>{
-    const key=`${row.Local}|${row.Vendedor}`,weekKey=weekKeyOf(row);
-    if(!byPerson[key])byPerson[key]={local:row.Local,name:row.Vendedor};
+    const key=row.Vendedor,weekKey=weekKeyOf(row);
+    if(!byPerson[key])byPerson[key]={name:row.Vendedor};
     if(weekKey===currentKey)byPerson[key].actual=row;
     if(weekKey===prevKey)byPerson[key].previo=row;
   });
   const ratioOf=row=>{if(!row)return null;const target=num(row,'Venta obj');return target?num(row,'Venta real')/target*100:null};
-  const list=Object.values(byPerson).filter(p=>p.actual&&p.previo).map(p=>({...p,mejora:ratioOf(p.actual)-ratioOf(p.previo)})).filter(p=>p.mejora!==null&&!Number.isNaN(p.mejora));
+  const list=Object.values(byPerson).filter(p=>p.actual&&p.previo).map(p=>({...p,local:p.actual.Local,mejora:ratioOf(p.actual)-ratioOf(p.previo)})).filter(p=>p.mejora!==null&&!Number.isNaN(p.mejora));
   list.sort((a,b)=>b.mejora-a.mejora);
   return list[0]||null;
 }
+// mejoraLeaderStore sigue con currentWeekRows() crudo a propósito (rankea LOCALES, no personas —
+// ver comentario de fusionarVendedoresCompartidos más arriba).
 function mejoraLeaderStore(){
   const {rows,weekKeys}=currentWeekRows();
   if(weekKeys.length<2)return null;
@@ -720,8 +791,12 @@ function renderRankEvolution(){
 function renderEvolutionSeller(){
   const seller=$('sellerFilter').value;
   if(seller==='all'){showEvolutionEmpty('Elegí un vendedor','Elegí un vendedor en el filtro "Vendedor" de arriba para ver su evolución semanal.');return}
+  // vendorHistory() ya filtra por este mismo nombre exacto ANTES de agrupar (y agrupa por nombre
+  // solo, ver fusionarVendedoresCompartidos) — no puede devolver más de un historial acá, así que ya
+  // no hace falta el aviso de "vendedores ambiguos, elegí un Local" que existía antes: esa
+  // ambigüedad era justamente el síntoma del bug de agrupar por Local+Vendedor (auditoría
+  // 2026-09-05), no un caso real de dos personas distintas.
   const histories=vendorHistory();
-  if(histories.length>1&&$('localFilter').value==='all'){showEvolutionEmpty('Ambiguo',`Hay ${histories.length} vendedores llamados "${escapeHtml(seller)}" en distintos locales. Elegí también un Local en el filtro de arriba para desambiguar.`);return}
   const person=histories[0];
   if(!person||!person.weeks.length){showEvolutionEmpty('Sin semanas','Sin datos de VENDEDOR_SEMANAL para este vendedor todavía.');return}
   renderEvolutionWeeks(person.weeks,`${person.name} · ${person.local}`);
@@ -769,16 +844,20 @@ function renderEvolutionWeeks(weeks,heading){
   $('evolutionBadges').innerHTML=recordBadges.length?recordBadges.map(m=>{const meta=badgeMeta[m];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>Récord de ${meta.label}</strong><span>esta semana</span></div><span class="badge-value">${meta.fmt(rec[m].value)}</span></div>`}).join(''):'<div class="empty-state">Sin récords nuevos esta semana</div>';
 }
 function renderRankMejora(){
-  const {rows,weekKeys}=currentWeekRows();
+  const {rows,weekKeys}=currentWeekRowsPersonas();
   if(!weekKeys.length){showRankingEmpty();return}
   const currentKey=weekKeys[weekKeys.length-1],prevKey=weekKeys.length>1?weekKeys[weekKeys.length-2]:null;
   const [currentMes,currentSemana]=currentKey.split('|');
   $('rankingPeriodBadge').textContent=prevKey?`Fecha ${currentSemana} de ${currentMes} vs. fecha anterior`:`Fecha ${currentSemana} de ${currentMes} · primera fecha registrada`;
 
+  // Por nombre solo: si el combo de locales de la persona cambió entre la semana actual y la
+  // anterior (ej. cubrió 2 locales esta semana y solo 1 la pasada), la clave `${Local}|${Vendedor}`
+  // los trataba como DOS personas distintas y "Mejora" nunca podía calcularse para esa persona
+  // (bug real, auditoría 2026-09-05).
   const byPerson={};
   rows.forEach(row=>{
-    const key=`${row.Local}|${row.Vendedor}`,weekKey=weekKeyOf(row);
-    if(!byPerson[key])byPerson[key]={local:row.Local,name:row.Vendedor};
+    const key=row.Vendedor,weekKey=weekKeyOf(row);
+    if(!byPerson[key])byPerson[key]={name:row.Vendedor};
     if(weekKey===currentKey)byPerson[key].actual=row;
     if(prevKey&&weekKey===prevKey)byPerson[key].previo=row;
   });
@@ -788,7 +867,7 @@ function renderRankMejora(){
   const list=Object.values(byPerson).filter(p=>p.actual).map(p=>{
     const actualRatio=ratioOf(p.actual),prevRatio=p.previo?ratioOf(p.previo):null;
     const mejora=(actualRatio!==null&&prevRatio!==null)?actualRatio-prevRatio:null;
-    return{...p,actualRatio,prevRatio,mejora};
+    return{...p,local:p.actual.Local,actualRatio,prevRatio,mejora};
   });
 
   list.sort((a,b)=>{
@@ -829,7 +908,7 @@ function renderRankMejora(){
 function renderRankCategory(category){
   const cfg=RANK_CATEGORIES[category];
   const mode=cfg.sortable?state.rankSortMode:cfg.mode;
-  const {rows,weekKeys}=currentWeekRows();
+  const {rows,weekKeys}=currentWeekRowsPersonas();
   if(!weekKeys.length){showRankingEmpty();return}
   const currentKey=weekKeys[weekKeys.length-1];
   const [currentMes,currentSemana]=currentKey.split('|');
@@ -858,8 +937,14 @@ function renderRankCategory(category){
   // "Puntos GP" en Liga VDH: siempre el puesto REAL contra toda la empresa esa fecha (no el
   // índice dentro de la lista ya filtrada por Local/Vendedor) — mismo criterio que GP VDH,
   // para que un supervisor filtrando por un local no vea puntos inflados/falsos.
-  const gpPoints=category==='liga'?(()=>{const map={};f1RatioStandings(currentKey,null).slice(0,10).forEach((p,i)=>{map[`${p.local}|${p.name}`]=F1_MAIN_POINTS[i]});return map})():null;
-  const gpCol=p=>gpPoints[`${p.local}|${p.name}`]??'—';
+  // Por nombre solo (no `${local}|${name}`): f1RatioStandings siempre corre sobre TODA la empresa
+  // sin filtro de Local, así que a alguien que cubre 2 locales le puede quedar acá un Local fundido
+  // ("San Justo 1 + Flores") distinto al `p.local` de ESTA lista (que si hay un filtro de Local
+  // activo puede venir de un solo local) — comparar por el string compuesto los desencontraba y
+  // "Puntos GP" quedaba en "—" para esa persona pese a haber puntuado (bug real, auditoría
+  // 2026-09-05).
+  const gpPoints=category==='liga'?(()=>{const map={};f1RatioStandings(currentKey,null).slice(0,10).forEach((p,i)=>{map[p.name]=F1_MAIN_POINTS[i]});return map})():null;
+  const gpCol=p=>gpPoints[p.name]??'—';
 
   const body=list.map((p,i)=>`<tr><td class="num">${rankPos(i)}</td><td class="seller-name">${escapeHtml(p.name)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${cfg.fmt(p.real)}</td><td class="num">${p.obj?cfg.fmt(p.obj):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.ratio!==null?percent(p.ratio):'—'}</td>${gpPoints?`<td class="num">${gpCol(p)}</td>`:''}</tr>`).join('');
 
@@ -924,8 +1009,11 @@ function renderSeason(){
 
   const sellerRows=seasonSellerRows();
   const groups={};
-  sellerRows.forEach(row=>{const key=`${row.Local}|${row.Vendedor}`;if(!groups[key])groups[key]={local:row.Local,name:row.Vendedor,actual:0,pxtSum:0,pxtCount:0};groups[key].actual+=num(row,'Venta real');const pxt=num(row,'PxT real');if(pxt){groups[key].pxtSum+=pxt;groups[key].pxtCount++}});
-  const rankList=Object.values(groups).map(g=>({...g,pxt:g.pxtCount?g.pxtSum/g.pxtCount:0})).sort((a,b)=>b.actual-a.actual);
+  // Por nombre solo (no Local+Vendedor): alguien que vendió en dos locales durante el semestre
+  // sumaba su venta acumulada partida en dos filas separadas, en vez de en una sola por persona
+  // (bug real, auditoría 2026-09-05). `locales` junta todos los locales donde vendió para mostrarla.
+  sellerRows.forEach(row=>{const key=row.Vendedor;if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),actual:0,pxtSum:0,pxtCount:0};groups[key].locales.add(row.Local);groups[key].actual+=num(row,'Venta real');const pxt=num(row,'PxT real');if(pxt){groups[key].pxtSum+=pxt;groups[key].pxtCount++}});
+  const rankList=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + '),pxt:g.pxtCount?g.pxtSum/g.pxtCount:0})).sort((a,b)=>b.actual-a.actual);
   const teamTotal=rankList.reduce((sum,g)=>sum+g.actual,0)||1;
   $('seasonRankingTable').innerHTML=`<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>Venta acum.</th><th>Part.</th><th>PxT</th></tr></thead><tbody>${rankList.length?rankList.slice(0,10).map((g,i)=>`<tr><td class="num">${i+1}</td><td class="seller-name">${escapeHtml(g.name)}</td><td class="seller-location">${escapeHtml(g.local)}</td><td class="num">${money(g.actual)}</td><td class="num">${percent(g.actual/teamTotal*100)}</td><td class="num">${number(g.pxt)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-state">Sin datos</td></tr>'}</tbody>`;
 
@@ -942,13 +1030,25 @@ function renderSeason(){
 }
 function periodRows(table,monthId,weekId,fromId=null,toId=null){const month=$(monthId).value,week=$(weekId).value,from=fromId?$(fromId).value:'',to=toId?$(toId).value:'';return (state.tables[table]||[]).filter(row=>(month==='all'||String(row.Mes??'')===month)&&(week==='all'||String(row.Semana??'')===week)&&( $('localFilter').value==='all'||String(row.Local??'')===$('localFilter').value)&&( $('sellerFilter').value==='all'||String(row.Vendedor??'')===$('sellerFilter').value)&&(!from||normalizeDate(row.Fecha||row['Fecha foto'])>=from)&&(!to||normalizeDate(row.Fecha||row['Fecha foto'])<=to))}
 function fillPeriodFilters(monthId,weekId){const months=[...new Set(allRows('VENDEDOR_SEMANAL').map(row=>row.Mes).filter(Boolean))];const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;const previousMonth=$(monthId).value;$(monthId).innerHTML=option('all','Todos los meses')+months.map(x=>option(x,x)).join('');$(monthId).value=months.includes(previousMonth)?previousMonth:'all';const month=$(monthId).value;const weeks=[...new Set(allRows('VENDEDOR_SEMANAL').filter(row=>month==='all'||String(row.Mes??'')===month).map(row=>row.Semana).filter(v=>v!==undefined&&v!==null))].sort((a,b)=>Number(a)-Number(b));const previousWeek=$(weekId).value;$(weekId).innerHTML=option('all','Todas las semanas')+weeks.map(x=>option(x,`Semana ${x}`)).join('');$(weekId).value=weeks.map(String).includes(previousWeek)?previousWeek:'all'}
-function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};rows.forEach(row=>{const key=`${row.Local}|${row.Vendedor}`;if(!groups[key])groups[key]={local:row.Local,name:row.Vendedor,sale:0,target:0,traffic:0,conversion:0,ticket:0,garments:0,count:0};const group=groups[key];group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=num(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++});
+function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};
+  // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba partido en dos
+  // filas de esta tabla, cada una con la mitad de su venta y objetivo, como si fueran dos personas
+  // distintas — el nombre+apellido ya alcanza como identidad única (bug real reportado el
+  // 2026-09-05). `locales` guarda los locales reales por separado (sin combinar todavía) para no
+  // romper localObjetivoFor() más abajo, que necesita el nombre exacto de un local de LOCAL_DIARIO.
+  rows.forEach(row=>{
+    const key=row.Vendedor;
+    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,conversion:0,ticket:0,garments:0,count:0};
+    const group=groups[key];
+    group.locales.add(row.Local);
+    group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=num(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++;
+  });
   // CRITERIO GENERAL DE ORDENAMIENTO: esta tabla (Detalle Individual, sección 04 Vendedores) no
   // tenía NINGÚN sort — mostraba a cada vendedor en el orden crudo en que aparecía en la planilla,
   // no por rendimiento. Ordena de mayor a menor por % de cumplimiento de objetivo (mismo criterio
   // que usa el resto del dashboard — Liga VDH, GP VDH, etc. — para no premiar volumen bruto de un
   // local grande sobre el cumplimiento real de uno chico), con venta real y nombre como desempate.
-  const list=Object.values(groups).sort((a,b)=>{
+  const list=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + ')})).sort((a,b)=>{
     const ar=a.target?a.sale/a.target:0,br=b.target?b.sale/b.target:0;
     return (br-ar)||(b.sale-a.sale)||String(a.name).localeCompare(String(b.name),'es');
   });
@@ -969,7 +1069,11 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   const avgGarments=list.length?list.reduce((sum,row)=>sum+row.garments/Math.max(1,row.count),0)/list.length:0;
   // Conversión/Ticket objetivo son del LOCAL, no por vendedor (ver localObjetivoFor) — se promedia el
   // objetivo de los locales presentes en la vista actual para el diagnóstico y la card de referencia.
-  const localsPresent=[...new Set(list.map(row=>row.local))];
+  // Se arma desde row.locales (los locales reales, sin combinar) y no desde row.local (que puede ser
+  // "San Justo 1 + Flores" para alguien que cubre dos) — localObjetivoFor necesita el nombre EXACTO
+  // de un local de LOCAL_DIARIO, un string combinado no matchea ninguno (bug real, auditoría
+  // 2026-09-05).
+  const localsPresent=[...new Set(list.flatMap(row=>[...row.locales]))];
   const localObjs=localsPresent.map(local=>localObjetivoFor(local,metricsMonth));
   const avgConvObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.convObj,0)/localObjs.length:0;
   const avgTicketObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.ticketObj,0)/localObjs.length:0;
@@ -979,12 +1083,21 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   renderDiagnosisPanel('sellerDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderSellerFocus(list,metricsMonth);
   const body=list.map(row=>{const ratio=row.target?row.sale/row.target:0;return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.count?row.conversion/row.count:0)}</td><td class="num">${money(row.count?row.ticket/row.count:0)}</td><td class="num">${number(row.count?row.garments/row.count:0)}</td><td class="num ${ratio>=1?'positive':ratio<.9?'negative':'warning'}">${percent(ratio*100)}</td></tr>`}).join('');$('sellerDetailTable').innerHTML=`<thead><tr><th>Vendedor</th><th>Local</th><th>Venta</th><th>Objetivo</th><th>Tráfico</th><th>Conversión</th><th>Ticket promedio</th><th>Prendas por ticket</th><th>% objetivo</th></tr></thead><tbody>${body||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;$('sellerDetailRowsCount').textContent=`${list.length} vendedores`}
-function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessoryMonthFilter','accessoryWeekFilter'),groups={};rows.forEach(row=>{const key=`${row.Local}|${row.Vendedor}`;if(!groups[key])groups[key]={local:row.Local,name:row.Vendedor,perfumesTarget:0,perfumesActual:0,boxerTarget:0,boxerActual:0};groups[key].perfumesTarget+=num(row,'Perfumes obj');groups[key].perfumesActual+=num(row,'Perfumes real');groups[key].boxerTarget+=num(row,'Boxer obj');groups[key].boxerActual+=num(row,'Boxer real')});
+function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessoryMonthFilter','accessoryWeekFilter'),groups={};
+  // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba con su venta de
+  // perfumes/boxers y su objetivo partidos en dos filas, como si fueran dos vendedores distintos
+  // (bug real, auditoría 2026-09-05).
+  rows.forEach(row=>{
+    const key=row.Vendedor;
+    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),perfumesTarget:0,perfumesActual:0,boxerTarget:0,boxerActual:0};
+    groups[key].locales.add(row.Local);
+    groups[key].perfumesTarget+=num(row,'Perfumes obj');groups[key].perfumesActual+=num(row,'Perfumes real');groups[key].boxerTarget+=num(row,'Boxer obj');groups[key].boxerActual+=num(row,'Boxer real');
+  });
   // CRITERIO GENERAL DE ORDENAMIENTO: tampoco tenía sort — orden crudo de planilla. No hay una
   // columna $ ni un único % acá (son 2 productos en paralelo), así que se ordena por el mismo
   // % de cumplimiento COMBINADO (perfumes+boxer) que esta función ya usa para su propia card
   // "Cumplimiento global" más abajo — se reusa la fórmula existente, no se inventa una nueva.
-  const list=Object.values(groups).filter(row=>row.perfumesTarget||row.perfumesActual||row.boxerTarget||row.boxerActual).sort((a,b)=>{
+  const list=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + ')})).filter(row=>row.perfumesTarget||row.perfumesActual||row.boxerTarget||row.boxerActual).sort((a,b)=>{
     const ar=(a.perfumesTarget+a.boxerTarget)?(a.perfumesActual+a.boxerActual)/(a.perfumesTarget+a.boxerTarget):0;
     const br=(b.perfumesTarget+b.boxerTarget)?(b.perfumesActual+b.boxerActual)/(b.perfumesTarget+b.boxerTarget):0;
     return (br-ar)||String(a.name).localeCompare(String(b.name),'es');
@@ -1078,7 +1191,14 @@ function renderOverview(){
   safeRender(renderTeamHealth);
 }
 function renderStoreHealth(localRows){const container=$('storeHealth');const groups={};localRows.forEach(row=>{const key=row.Local||'Sin local';if(!groups[key])groups[key]={local:key,actual:0,target:0};groups[key].actual+=num(row,'Venta real');groups[key].target+=num(row,'Objetivo')});const list=Object.values(groups).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=1?'ok':x.ratio>=.9?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<.9).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.local)}</span><span class="health-local">${percent(x.ratio*100)} del objetivo</span><span class="health-ratio negative">${money(x.actual-x.target)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Todos los locales en objetivo</div>`}`}
-function renderTeamHealth(){const container=$('teamHealth');const rows=state.tables.VENDEDOR_SEMANAL||[];const latest={};rows.forEach(row=>{const key=`${row.Local}|${row.Vendedor}`,semana=Number(row.Semana)||0;if(!latest[key]||semana>=latest[key].semana)latest[key]={semana,local:row.Local,name:row.Vendedor,actual:num(row,'Venta real'),target:num(row,'Venta obj')}});const list=Object.values(latest).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=1?'ok':x.ratio>=.9?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<.9).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.name)}</span><span class="health-local">${escapeHtml(x.local)}</span><span class="health-ratio negative">${percent(x.ratio*100)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Nadie en rojo esta semana</div>`}`}
+function renderTeamHealth(){const container=$('teamHealth');
+  // Fundida por vendedor compartido y por nombre solo: alguien que cubre 2 locales quedaba con DOS
+  // entradas de "salud del equipo" (una por local, cada una con la mitad de su venta y objetivo),
+  // pudiendo aparecer "en rojo" en las dos aunque su total combinado estuviera bien — bug real,
+  // auditoría 2026-09-05.
+  const rows=fusionarVendedoresCompartidos(state.tables.VENDEDOR_SEMANAL||[]);
+  const latest={};
+  rows.forEach(row=>{const key=row.Vendedor,semana=Number(row.Semana)||0;if(!latest[key]||semana>=latest[key].semana)latest[key]={semana,local:row.Local,name:row.Vendedor,actual:num(row,'Venta real'),target:num(row,'Venta obj')}});const list=Object.values(latest).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=1?'ok':x.ratio>=.9?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<.9).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.name)}</span><span class="health-local">${escapeHtml(x.local)}</span><span class="health-ratio negative">${percent(x.ratio*100)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Nadie en rojo esta semana</div>`}`}
 function renderBars(rows,monthCtx){
   const container=$('salesBars');
   const byDate={};
