@@ -1,5 +1,5 @@
 const DATA_ENDPOINT='https://script.google.com/macros/s/AKfycbyuS6K8oq2KWJ6BMSayHXHHSf0v2jr70OoSD4UfwX77cD3OobN1OrzFsTTXC6JI9Yo/exec';
-const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1},rankCategory:'ticket',rankSortMode:'units',rankScope:'liga',evoScope:'seller',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
+const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankCategory:'ticket',rankSortMode:'units',rankScope:'liga',evoScope:'seller',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
 // de refresh) para reemplazar los emoji de navegación/medallero por vectores consistentes en el
@@ -218,20 +218,25 @@ function computeStoreFocusRows(rows){
   const groups={};
   rows.forEach(row=>{
     const key=row.Local||'Sin local';
-    if(!groups[key])groups[key]={local:key,traffic:0,targetTraffic:0,convSum:0,convCount:0,convObjSum:0,ticketSum:0,ticketCount:0,ticketObjSum:0,count:0};
+    if(!groups[key])groups[key]={local:key,traffic:0,targetTraffic:0,convSum:0,convCount:0,convObjSum:0,convObjCount:0,ticketSum:0,ticketCount:0,ticketObjSum:0,ticketObjCount:0,count:0};
     const g=groups[key];
     g.traffic+=num(row,'Tráfico real');g.targetTraffic+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
     const conv=num(row,'Conversión'),convObj=num(row,'Conversión obj');
     if(conv||conv===0){g.convSum+=conv;g.convCount++}
-    if(convObj)g.convObjSum+=convObj;
+    if(convObj){g.convObjSum+=convObj;g.convObjCount++}
     const ticket=num(row,'Ticket prom.'),ticketObj=num(row,'Ticket obj');
     if(ticket||ticket===0){g.ticketSum+=ticket;g.ticketCount++}
-    if(ticketObj)g.ticketObjSum+=ticketObj;
+    if(ticketObj){g.ticketObjSum+=ticketObj;g.ticketObjCount++}
     g.count++;
   });
   return Object.values(groups).map(g=>{
-    const avgConv=g.convCount?g.convSum/g.convCount:0,avgConvObj=g.count?g.convObjSum/g.count:0;
-    const avgTicket=g.ticketCount?g.ticketSum/g.ticketCount:0,avgTicketObj=g.count?g.ticketObjSum/g.count:0;
+    // Conversión/Ticket obj son un valor mensual constante repetido por día — promediar dividiendo
+    // por g.count (TODOS los días del período) diluía el % apenas faltara un solo día con esa
+    // columna sin cargar (ej. columna agregada a mitad de mes). Ahora se divide por la cantidad de
+    // días donde el objetivo realmente vino cargado, igual que ya hacía avgConv/avgTicket con los
+    // valores reales (bug real, auditoría 2026-09-05).
+    const avgConv=g.convCount?g.convSum/g.convCount:0,avgConvObj=g.convObjCount?g.convObjSum/g.convObjCount:0;
+    const avgTicket=g.ticketCount?g.ticketSum/g.ticketCount:0,avgTicketObj=g.ticketObjCount?g.ticketObjSum/g.ticketObjCount:0;
     const trafficRatio=g.targetTraffic?g.traffic/g.targetTraffic:null;
     return{
       local:g.local,traffic:g.traffic,avgConv,avgConvObj,avgTicket,avgTicketObj,trafficRatio,
@@ -268,8 +273,16 @@ function renderStoreFocus(rows){
 // LOCAL_DIARIO filtrado por Local+Mes (no por Semana: es una constante mensual repetida por día).
 function localObjetivoFor(local,month){
   const refRows=(state.tables.LOCAL_DIARIO||[]).filter(row=>String(row.Local??'')===String(local??'')&&(month==='all'||String(row.Mes??'')===month));
-  const totals=refRows.reduce((acc,row)=>{acc.convObj+=num(row,'Conversión obj');acc.ticketObj+=num(row,'Ticket obj');acc.count++;return acc},{convObj:0,ticketObj:0,count:0});
-  return{convObj:totals.count?totals.convObj/totals.count:0,ticketObj:totals.count?totals.ticketObj/totals.count:0};
+  // Se divide por la cantidad de días donde el objetivo realmente vino cargado, no por refRows.count
+  // (todos los días del mes) — si algún día quedó sin esa columna cargada, dividir por el total de
+  // días diluía el promedio por debajo del valor mensual real (bug real, auditoría 2026-09-05).
+  const totals=refRows.reduce((acc,row)=>{
+    const convObj=num(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
+    if(convObj){acc.convObj+=convObj;acc.convObjCount++}
+    if(ticketObj){acc.ticketObj+=ticketObj;acc.ticketObjCount++}
+    return acc;
+  },{convObj:0,convObjCount:0,ticketObj:0,ticketObjCount:0});
+  return{convObj:totals.convObjCount?totals.convObj/totals.convObjCount:0,ticketObj:totals.ticketObjCount?totals.ticketObj/totals.ticketObjCount:0};
 }
 function computeSellerFocusRows(list,month){
   const cache={};
@@ -796,7 +809,10 @@ function renderRankMejora(){
     metricsCard('Vendedores rankeados',number(list.length),'según filtros')+
     metricsCard('En mejora',number(enMejora),withMejora.length?`de ${withMejora.length} con semana anterior`:'sin semana anterior para comparar')+
     (top?metricsCard('Mayor mejora',escapeHtml(top.name),`${top.mejora>=0?'+':''}${top.mejora.toFixed(1)} pts`,top.mejora>=0?'good':'bad'):metricsCard('Mayor mejora','—','esperando 2ª semana'))+
-    metricsCard('Mejora promedio',withMejora.length?`${avgMejora>=0?'+':''}${avgMejora.toFixed(1)} pts`:'—',withMejora.length?'entre los que tienen 2 semanas':'esperando 2ª semana',avgMejora>=0?'good':'bad')
+    // El tono (verde/rojo) también tiene que depender de si hay datos — antes se pintaba "good" en
+    // verde igual (avgMejora quedaba en 0 por default) aunque el texto dijera "esperando 2ª semana"
+    // (bug real, auditoría 2026-09-05).
+    metricsCard('Mejora promedio',withMejora.length?`${avgMejora>=0?'+':''}${avgMejora.toFixed(1)} pts`:'—',withMejora.length?'entre los que tienen 2 semanas':'esperando 2ª semana',withMejora.length?(avgMejora>=0?'good':'bad'):'')
     :'';
 
   const body=list.map((p,i)=>{
@@ -936,7 +952,17 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     const ar=a.target?a.sale/a.target:0,br=b.target?b.sale/b.target:0;
     return (br-ar)||(b.sale-a.sale)||String(a.name).localeCompare(String(b.name),'es');
   });
-  const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;const daily=(state.tables.VENDEDOR_DIARIO||[]).filter(row=>rowMatchesFilters(row)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));const dailyTotals=daily.reduce((acc,row)=>{acc.actual+=num(row,'Venta real');acc.target+=num(row,'Objetivo del día');return acc},{actual:0,target:0});const globalRatio=dailyTotals.target?dailyTotals.actual/dailyTotals.target:0;
+  const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;const daily=(state.tables.VENDEDOR_DIARIO||[]).filter(row=>rowMatchesFilters(row)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
+  // VENDEDOR_DIARIO no trae una columna de objetivo diario propia (buscaba 'Objetivo del día', que
+  // no existe en ninguna alias — daba siempre 0 y la card "Venta" de acá abajo nunca mostraba el %,
+  // bug real de la auditoría 2026-09-05). El objetivo diario de CADA vendedor se deriva igual que en
+  // sellerTargetForDay: su objetivo SEMANAL (VENDEDOR_SEMANAL) repartido entre los días de esa semana.
+  const dailyTotals=daily.reduce((acc,row)=>{
+    const weekLength=weekDates(row).length;
+    acc.actual+=num(row,'Venta real');
+    acc.target+=weekLength?sellerWeeklyTarget(row.Local,row.Mes,row.Semana,row.Vendedor)/weekLength:0;
+    return acc;
+  },{actual:0,target:0});
   const totalTraffic=list.reduce((sum,row)=>sum+row.traffic,0);
   const avgConv=list.length?list.reduce((sum,row)=>sum+row.conversion/Math.max(1,row.count),0)/list.length:0;
   const avgTicket=list.length?list.reduce((sum,row)=>sum+row.ticket/Math.max(1,row.count),0)/list.length:0;
@@ -1372,7 +1398,14 @@ function priorSemesterSeries(thisSemesterStartRef){
 // (y la extracción a este helper se había hecho a medias, dejando `monthRows`/`localMonth` sueltos
 // sin declarar en renderDeviation() — ese era el ReferenceError que rompía toda la carga).
 function monthContext(){
-  const localMonth=(state.tables.LOCAL_DIARIO||[])[0]?.Mes||'';
+  // El mes "actual" NO es el de la primera fila de LOCAL_DIARIO: esa tabla acumula todo el
+  // semestre (Informe de Temporada la recorre entera), así que [0].Mes se queda pegado en el
+  // primer mes cargado (Septiembre) para siempre — apenas entra Octubre, estas 3 tarjetas seguían
+  // calculando el objetivo del mes solo con filas de Septiembre (bug real, detectado en la
+  // auditoría del 2026-09-05). Se toma el más reciente de MONTH_ORDER entre los meses presentes,
+  // mismo criterio que ya usa renderSeason() para `monthsPresent`.
+  const monthsPresent=[...new Set((state.tables.LOCAL_DIARIO||[]).map(row=>row.Mes).filter(Boolean))];
+  const localMonth=monthsPresent.sort((a,b)=>MONTH_ORDER.indexOf(a)-MONTH_ORDER.indexOf(b)).pop()||'';
   // No usar overviewRows() acá: aplica el filtro de fecha del "Período" de arriba, y este objetivo
   // tiene que ser el del MES COMPLETO sin importar qué rango de fechas esté seleccionado (mismo
   // criterio que ecomRows, una línea abajo) — si no, elegir un solo día encoge el objetivo del mes
@@ -1425,11 +1458,24 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
   $('deviationCard').innerHTML=rowLocales+rowOnline+rowFoco+rowBanner;
 }
 function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;const conversions=rows.map(row=>num(row,'Conversión')).filter(value=>value||value===0),avgConv=conversions.length?conversions.reduce((sum,value)=>sum+value,0)/conversions.length:0;const tickets=rows.map(row=>num(row,'Ticket prom.')).filter(value=>value||value===0),avgTicket=tickets.length?tickets.reduce((sum,value)=>sum+value,0)/tickets.length:0;
-  // Efectivo/Tarjeta/Descuento/objetivos son valores mensuales repetidos en cada día del mes: se promedian, no se suman.
-  const monthly=rows.reduce((acc,row)=>{acc.cash+=num(row,'Efectivo');acc.card+=num(row,'Tarjeta');acc.discount+=num(row,'Descuento');acc.convObj+=num(row,'Conversión obj');acc.ticketObj+=num(row,'Ticket obj');acc.count++;return acc},{cash:0,card:0,discount:0,convObj:0,ticketObj:0,count:0});
+  // Efectivo/Tarjeta/Descuento/objetivos son valores mensuales repetidos en cada día del mes: se
+  // promedian, no se suman. Se divide por la cantidad de días donde cada campo realmente vino
+  // cargado (no por monthly.count = todos los días del período) — si esa columna se agregó a mitad
+  // de mes o falta en algún día, dividir por el total diluía el % por debajo del valor real
+  // (bug real, auditoría 2026-09-05).
+  const monthly=rows.reduce((acc,row)=>{
+    const cash=num(row,'Efectivo'),card=num(row,'Tarjeta'),discount=num(row,'Descuento'),convObj=num(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
+    if(cash){acc.cash+=cash;acc.cashCount++}
+    if(card){acc.card+=card;acc.cardCount++}
+    if(discount){acc.discount+=discount;acc.discountCount++}
+    if(convObj){acc.convObj+=convObj;acc.convObjCount++}
+    if(ticketObj){acc.ticketObj+=ticketObj;acc.ticketObjCount++}
+    acc.count++;
+    return acc;
+  },{cash:0,cashCount:0,card:0,cardCount:0,discount:0,discountCount:0,convObj:0,convObjCount:0,ticketObj:0,ticketObjCount:0,count:0});
   const hasPayment=monthly.count>0&&(monthly.cash||monthly.card||monthly.discount);
-  const avgCash=monthly.count?monthly.cash/monthly.count:0,avgCard=monthly.count?monthly.card/monthly.count:0,avgDiscount=monthly.count?monthly.discount/monthly.count:0;
-  const avgConvObj=monthly.count?monthly.convObj/monthly.count:0,avgTicketObj=monthly.count?monthly.ticketObj/monthly.count:0;
+  const avgCash=monthly.cashCount?monthly.cash/monthly.cashCount:0,avgCard=monthly.cardCount?monthly.card/monthly.cardCount:0,avgDiscount=monthly.discountCount?monthly.discount/monthly.discountCount:0;
+  const avgConvObj=monthly.convObjCount?monthly.convObj/monthly.convObjCount:0,avgTicketObj=monthly.ticketObjCount?monthly.ticketObj/monthly.ticketObjCount:0;
   const hasConvObj=avgConvObj>0,hasTicketObj=avgTicketObj>0;
   const brechaConv=avgConv-avgConvObj;
 
@@ -1657,7 +1703,11 @@ function renderEcommerce(){
   const cutoff=to||(loadedDates.length?loadedDates[loadedDates.length-1]:'')||todayKey();
   const daily=dailyAll.filter(row=>normalizeDate(row.Fecha)<=cutoff);
   const a=aggregate(daily),ratio=a.target?a.actual/a.target:0,delta=a.actual-a.target;
-  const diasEnMes=daysInCalendarMonth(normalizeDate(dailyAll[0]?.Fecha)||cutoff||todayKey());
+  // Antes usaba dailyAll[0]?.Fecha (primera fila de TODO el historial de ECOM_DIARIO, que arrastra
+  // meses viejos) para decidir cuántos días tiene "el mes" — con más de un mes cargado, tomaba el
+  // largo del primer mes (ej. Septiembre, 30 días) en vez del mes vigente (bug real, auditoría
+  // 2026-09-05). `cutoff` ya es la fecha vigente (filtro "Hasta" o el último día cargado).
+  const diasEnMes=daysInCalendarMonth(cutoff);
   const diasTranscurridos=loadedDates.length,diasRestantes=Math.max(0,diasEnMes-diasTranscurridos);
   const ritmoNecesario=diasRestantes?Math.max(0,-delta)/diasRestantes:0;
   $('ecomMetrics').innerHTML=metricsCard('Avance del mes',percent(ratio*100),'% del objetivo',statusTone(ratio))+metricsCard('Venta acumulada',money(a.actual),`${diasTranscurridos} días cargados`)+metricsCard('Desvío acumulado',money(delta),delta>=0?'por encima de lo esperado':diasTranscurridos?'por debajo de lo esperado':'aún sin días cargados',delta>=0?'good':'bad')+metricsCard('Ritmo necesario',money(ritmoNecesario),`${diasRestantes} días restantes`);
@@ -1691,7 +1741,40 @@ function renderEcommerce(){
   const columns=[['Fecha','Fecha'],['Día','Día'],['Objetivo','Objetivo'],['Venta real','Venta real'],['Visitas','Visitas'],['Q ventas','Q Ventas'],['Conversión','Conversión'],['Ticket','Ticket prom.']];
   renderTable('ecomTable',daily,columns,null,3)
 }
-function renderTable(id,rows,columns,transform,sortIndex){const table=$(id);const data=(transform?rows.map(transform):rows).slice().sort((a,b)=>String(b.Fecha||'').localeCompare(String(a.Fecha||'')));table.innerHTML=`<thead><tr>${columns.map(([label,key],i)=>`<th data-sort="${key}" data-table="${id}">${label}${state.sort.key===key?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`).join('')}</tr></thead><tbody>${data.slice(0,120).map(row=>`<tr>${columns.map(([label,key])=>{const value=row[key];const isMoney=['Objetivo','Venta real','Ticket','Desvío'].includes(label);const isPct=['Conversión'].includes(label);const cls=label==='Desvío'?(value>=0?'positive':'negative'):'num';return `<td class="${cls}">${isMoney?money(value):isPct?percent(value*100):escapeHtml(value??'—')}</td>`}).join('')}</tr>`).join('')||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;qa(`#${id} th[data-sort]`).forEach(th=>th.addEventListener('click',()=>{const key=th.dataset.sort;state.sort={key,direction:state.sort.key===key?-state.sort.direction:1};render()}))}
+// Orden real de la tabla: por defecto Fecha descendente (más reciente arriba). Si el usuario
+// clickeó un header de ESTA MISMA tabla, se ordena por esa columna — antes state.sort solo pintaba
+// la flechita ↑/↓ en el header pero el .sort() de los datos estaba fijo a Fecha sin importar el
+// click (bug real, auditoría 2026-09-05): la tabla parecía ordenarse y en realidad no se movía nada.
+// state.sort guarda también `table` para que ordenar storeTable por "Conversión" no reordene en
+// silencio a ecomTable la próxima vez que se renderice (comparten nombre de columna).
+function tableSortValue(row,key){return ['Fecha','Día','Local'].includes(key)?String(row[key]??''):parseNumber(row[key])}
+function renderTable(id,rows,columns,transform){
+  const table=$(id);
+  const data=(transform?rows.map(transform):rows).slice();
+  const sortActive=state.sort.table===id&&columns.some(([,key])=>key===state.sort.key);
+  data.sort((a,b)=>{
+    if(!sortActive)return String(b.Fecha||'').localeCompare(String(a.Fecha||''));
+    const av=tableSortValue(a,state.sort.key),bv=tableSortValue(b,state.sort.key);
+    return av<bv?-state.sort.direction:av>bv?state.sort.direction:0;
+  });
+  table.innerHTML=`<thead><tr>${columns.map(([label,key])=>`<th data-sort="${key}" data-table="${id}">${label}${sortActive&&state.sort.key===key?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`).join('')}</tr></thead><tbody>${data.slice(0,120).map(row=>`<tr>${columns.map(([label,key])=>{
+    const value=row[key];
+    const isMoney=['Objetivo','Venta real','Ticket','Desvío'].includes(label);
+    const isPct=['Conversión'].includes(label);
+    // Tráfico/Visitas/Q ventas caían al else de abajo sin pasar por number() — se veían sin
+    // separador de miles (ej. "1842") a diferencia de todo el resto del dashboard (bug real,
+    // auditoría 2026-09-05).
+    const isCount=['Tráfico','Visitas','Q ventas'].includes(label);
+    const cls=label==='Desvío'?(value>=0?'positive':'negative'):'num';
+    return `<td class="${cls}">${isMoney?money(value):isPct?percent(value*100):isCount?number(value):escapeHtml(value??'—')}</td>`;
+  }).join('')}</tr>`).join('')||`<tr><td colspan="${columns.length}" class="empty-state">Sin datos para estos filtros</td></tr>`}</tbody>`;
+  qa(`#${id} th[data-sort]`).forEach(th=>th.addEventListener('click',()=>{
+    const key=th.dataset.sort;
+    const same=state.sort.table===id&&state.sort.key===key;
+    state.sort={key,direction:same?-state.sort.direction:1,table:id};
+    render();
+  }));
+}
 // 04 y 05 consolidan por SEMANA (Mes/Semana), no por rango de fechas suelto — Desde/Hasta se
 // ocultan ahí para no dar a entender que se puede recortar una semana a la mitad, cosa que el
 // consolidador no soporta. Los pares Mes/Semana de cada una viven siempre en la barra de arriba
