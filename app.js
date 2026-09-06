@@ -1538,15 +1538,18 @@ function priorSemesterSeries(thisSemesterStartRef){
 // como el bloque de Cierre estimado de Lectura Rápida, antes cada uno los recalculaba por su lado
 // (y la extracción a este helper se había hecho a medias, dejando `monthRows`/`localMonth` sueltos
 // sin declarar en renderDeviation() — ese era el ReferenceError que rompía toda la carga).
+// Mes "actual" para todo lo que necesita el objetivo/proyección del MES COMPLETO — el más reciente
+// de MONTH_ORDER entre los meses presentes en la tabla, NO el de su primera fila: LOCAL_DIARIO
+// acumula todo el semestre (Informe de Temporada la recorre entera), así que [0].Mes se quedaría
+// pegado en el primer mes cargado (Septiembre) para siempre. Usado por monthContext() (Resumen
+// General) y renderStores() (Proyección de Cierre de Locales) — mismo criterio que ya usa
+// renderSeason() para `monthsPresent` (bug real, auditoría 2026-09-05).
+function currentMonthOf(tableName){
+  const monthsPresent=[...new Set((state.tables[tableName]||[]).map(row=>row.Mes).filter(Boolean))];
+  return monthsPresent.sort((a,b)=>MONTH_ORDER.indexOf(a)-MONTH_ORDER.indexOf(b)).pop()||'';
+}
 function monthContext(){
-  // El mes "actual" NO es el de la primera fila de LOCAL_DIARIO: esa tabla acumula todo el
-  // semestre (Informe de Temporada la recorre entera), así que [0].Mes se queda pegado en el
-  // primer mes cargado (Septiembre) para siempre — apenas entra Octubre, estas 3 tarjetas seguían
-  // calculando el objetivo del mes solo con filas de Septiembre (bug real, detectado en la
-  // auditoría del 2026-09-05). Se toma el más reciente de MONTH_ORDER entre los meses presentes,
-  // mismo criterio que ya usa renderSeason() para `monthsPresent`.
-  const monthsPresent=[...new Set((state.tables.LOCAL_DIARIO||[]).map(row=>row.Mes).filter(Boolean))];
-  const localMonth=monthsPresent.sort((a,b)=>MONTH_ORDER.indexOf(a)-MONTH_ORDER.indexOf(b)).pop()||'';
+  const localMonth=currentMonthOf('LOCAL_DIARIO');
   // No usar overviewRows() acá: aplica el filtro de fecha del "Período" de arriba, y este objetivo
   // tiene que ser el del MES COMPLETO sin importar qué rango de fechas esté seleccionado (mismo
   // criterio que ecomRows, una línea abajo) — si no, elegir un solo día encoge el objetivo del mes
@@ -1620,7 +1623,17 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   const hasConvObj=avgConvObj>0,hasTicketObj=avgTicketObj>0;
   const brechaConv=avgConv-avgConvObj;
 
-  const allMonthRows=activeRows('LOCAL_DIARIO');
+  // allMonthRows tiene que ser TODO el mes vigente, sin importar qué rango de fechas esté elegido
+  // en "Período" arriba — mismo criterio que monthContext() en Resumen General. Antes reusaba
+  // activeRows('LOCAL_DIARIO'), que SÍ respeta el filtro de fecha: filtrando por ej. "01/09 al
+  // 05/09" el objetivo del mes usado por "Proyección de Cierre" se encogía a esos 5 días en vez de
+  // sumar el mes completo, mientras la proyección de venta seguía extrapolando correctamente a los
+  // 30 días — comparaba un cierre proyectado a TODO el mes contra un objetivo de solo 5 días, un
+  // desvío inflado sin sentido (bug real, auditoría 2026-09-06). El filtro de Vendedor no aplica
+  // acá: está oculto en esta vista (ver switchView), así que no hace falta replicar la
+  // redistribución por vendedor que sí hace activeRows().
+  const local=$('localFilter').value,currentMonth=currentMonthOf('LOCAL_DIARIO');
+  const allMonthRows=(state.tables.LOCAL_DIARIO||[]).filter(row=>(local==='all'||String(row.Local??'')===local)&&(!currentMonth||String(row.Mes??'')===currentMonth));
   const monthTarget=aggregate(allMonthRows).target;
   const projection=storeProjection(allMonthRows);
   const daily=storeDailySeries(rows);
