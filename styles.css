@@ -771,6 +771,13 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .store-kpi-card.active .store-kpi-index{color:#FFD9B8}
 .store-kpi-label{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);font-weight:700}
 .store-kpi-card.active .store-kpi-label{color:#FFD9B8}
+/* #FFD9B8 (durazno clarito) está pensado para el --card oscuro del tema dark, donde resalta bien
+   sobre el degradé naranja de fondo — en tema claro --card es blanco (ver LIGHT MODE arriba) y ese
+   mismo color casi no se distingue del fondo, dejando el índice/label de la tarjeta activa
+   prácticamente ilegibles (bug real reportado con captura, 2026-09-06). Mismo tono que ya usa
+   .warning en este archivo para texto ámbar/naranja legible sobre blanco. */
+html[data-theme="light"] .store-kpi-card.active .store-kpi-index,
+html[data-theme="light"] .store-kpi-card.active .store-kpi-label{color:#B45309}
 .store-kpi-value{font:600 21px var(--display);color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .store-kpi-sub{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:900px){.store-kpi-grid{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)}}
