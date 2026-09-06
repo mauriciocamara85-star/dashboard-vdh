@@ -1171,11 +1171,14 @@ function renderOverview(){
   // Cierre estimado: mismo cálculo ponderado a los últimos días cargados que antes vivía como
   // bloque secundario de "Lectura rápida" — ahora es su propia tarjeta arriba; Lectura Rápida
   // (renderDeviation) quedó enfocada solo en diagnosticar la brecha actual, no en proyectarla.
+  // "Cargado" = Venta real > 0, mismo criterio que usa el SUMPRODUCTO de la planilla de cada local
+  // (auditoría 2026-09-06) — antes contaba un día como cargado con solo tráfico/visitas sin venta,
+  // que la planilla no cuenta para su propia ponderación.
   const perDateMonth={};
-  monthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,signal:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].signal+=num(row,'Venta real')+num(row,'Tráfico real')+num(row,'Visitas')});
-  const loadedActual={};
-  Object.keys(perDateMonth).forEach(d=>{if(perDateMonth[d].signal>0)loadedActual[d]=perDateMonth[d].actual});
-  const proj=Object.keys(loadedActual).length?projectMonth(loadedActual,daysInCalendarMonth(Object.keys(loadedActual).sort().pop())):null;
+  monthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,target:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].target+=num(row,'Objetivo')});
+  const loadedActual={},loadedTarget={};
+  Object.keys(perDateMonth).forEach(d=>{if(perDateMonth[d].actual>0){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}});
+  const proj=Object.keys(loadedActual).length?projectMonth(loadedActual,daysInCalendarMonth(Object.keys(loadedActual).sort().pop()),loadedTarget,monthTarget):null;
   const desvioProy=proj?proj.ponderada-monthTarget:null;
   const cierreTrend=proj?kpiTrendRow(desvioProy,`${desvioProy>=0?'+':''}${money(desvioProy)} vs. objetivo del mes`):null;
 
@@ -1483,20 +1486,40 @@ function attachSeasonHover(container,perMonth,xPair,y){
   svgEl.addEventListener('touchmove',move,{passive:true});
   svgEl.addEventListener('touchend',hide);
 }
-// Pondera cada día cargado según su antigüedad (el más reciente pesa más) para estimar el ritmo diario.
-// Es el cálculo de fondo detrás de "Cierre estimado" y de la línea de proyección del gráfico — ambos
-// comparten esta misma función en vez de duplicar la ponderación cada uno por su lado.
+// Pondera cada día cargado según su antigüedad (el más reciente pesa más) para estimar el ritmo
+// diario — usado SOLO por la línea de proyección del gráfico de Resumen General (projectToDate),
+// que corre más allá del mes calendario (fin de semestre, o el "Hasta" elegido arriba) y no tiene
+// equivalente en las planillas de cada local (esas proyectan nada más que el mes en curso). También
+// es el fallback de projectMonth() cuando no se le pasa objetivo diario para ponderar.
 function weightedDailyRate(perDateActual){
   const dates=Object.keys(perDateActual).sort();
   let weightSum=0,weightedActual=0,actual=0;
   dates.forEach((d,i)=>{const w=i+1;weightSum+=w;weightedActual+=perDateActual[d]*w;actual+=perDateActual[d]});
   return{dates,actual,ritmoPonderado:weightSum?weightedActual/weightSum:0,ritmoLineal:dates.length?actual/dates.length:0};
 }
-function projectMonth(perDateActual,diasEnMes){
+// "Proyección de Cierre"/"Cierre estimado": réplica exacta de la fórmula "Proyección Ponderada" de
+// las planillas de cada local (verificada contra la planilla real de Rivadavia, auditoría
+// 2026-09-06: con los mismos datos dio $20.194.930 contra los $20.122.489 de la planilla — 0,4% de
+// diferencia, redondeo de datos en vivo entre una lectura y otra). La planilla NO pondera por
+// antigüedad del día — pondera por el patrón real de día-de-semana + semana-del-mes de ese local, ya
+// codificado en el Objetivo diario que carga el equipo (Objetivo del día = objetivo del mes × % de
+// esa semana × % de ese día de semana, ver fórmula de la celda C13 en la planilla). Si lo vendido
+// hasta ahora representa X% del objetivo esperado para esos mismos días, se asume que el resto del
+// mes rinde igual al mismo ritmo: ventaAcumulada × objetivoDelMes ÷ objetivoAcumuladoDeLosDíasConVenta.
+// perDateTarget/monthTarget son opcionales: sin ellos (o sin objetivo cargado esos días) cae al
+// viejo ritmo por antigüedad de weightedDailyRate — así projectToDate() (que no tiene objetivo diario
+// "de planilla" con el que comparar, corre a fechas arbitrarias) sigue funcionando sin cambios.
+function projectMonth(perDateActual,diasEnMes,perDateTarget,monthTarget){
   const{dates,actual,ritmoPonderado,ritmoLineal}=weightedDailyRate(perDateActual);
   if(!dates.length)return null;
   const diasRestantes=Math.max(0,diasEnMes-dates.length);
-  return{dias:dates.length,diasRestantes,actual,ponderada:actual+ritmoPonderado*diasRestantes,lineal:actual+ritmoLineal*diasRestantes};
+  const lineal=actual+ritmoLineal*diasRestantes;
+  let ponderada=actual+ritmoPonderado*diasRestantes;
+  if(perDateTarget&&monthTarget){
+    const objAcum=dates.reduce((sum,d)=>sum+(perDateTarget[d]||0),0);
+    if(objAcum)ponderada=actual*monthTarget/objAcum;
+  }
+  return{dias:dates.length,diasRestantes,actual,ponderada,lineal};
 }
 // Mismo cálculo que projectMonth (ritmo ponderado a los últimos días cargados), pero proyectado hasta
 // una fecha de fin arbitraria en vez de "fin del mes calendario". La usa la línea de proyección del
@@ -1648,22 +1671,30 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
 
 // ── Cabecera de "Locales": 6 tarjetas selectoras + gráfico dinámico ──────────
 // Proyección de cierre SOLO con LOCAL_DIARIO (a diferencia del "Cierre estimado" del Resumen
-// General, que puede sumar e-commerce) — acá es la red física sola. Mismo cálculo ponderado
-// (weightedDailyRate/projectMonth) que ya usa el resto del dashboard, no uno nuevo.
+// General, que puede sumar e-commerce) — acá es la red física sola. monthRows YA es el mes completo
+// del local (ver renderStores(), no filtrado por fecha), así que sirve tal cual tanto para el
+// objetivo total del mes como para el objetivo acumulado de los días con venta — ver projectMonth().
+// "Cargado" = Venta real > 0 (no "hay tráfico pero sin venta cargada" como antes): mismo criterio
+// exacto que usa el SUMPRODUCTO de la planilla de cada local, para que el día a día que entra en la
+// ponderación sea idéntico al de la planilla (auditoría 2026-09-06).
 function storeProjection(monthRows){
   const perDate={};
   monthRows.forEach(row=>{
     const date=normalizeDate(row.Fecha);
     if(!date)return;
-    if(!perDate[date])perDate[date]={actual:0,signal:0};
+    if(!perDate[date])perDate[date]={actual:0,target:0};
     perDate[date].actual+=num(row,'Venta real');
-    perDate[date].signal+=num(row,'Venta real')+num(row,'Tráfico real');
+    perDate[date].target+=num(row,'Objetivo');
   });
-  const loadedActual={};
-  Object.keys(perDate).forEach(d=>{if(perDate[d].signal>0)loadedActual[d]=perDate[d].actual});
+  const loadedActual={},loadedTarget={};
+  let monthTarget=0;
+  Object.keys(perDate).forEach(d=>{
+    monthTarget+=perDate[d].target;
+    if(perDate[d].actual>0){loadedActual[d]=perDate[d].actual;loadedTarget[d]=perDate[d].target}
+  });
   const dates=Object.keys(loadedActual);
   if(!dates.length)return null;
-  return projectMonth(loadedActual,daysInCalendarMonth(dates.sort().pop()));
+  return projectMonth(loadedActual,daysInCalendarMonth(dates.sort().pop()),loadedTarget,monthTarget);
 }
 function storeDailySeries(rows){
   const byDate={};
