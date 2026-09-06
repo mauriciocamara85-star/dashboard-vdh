@@ -65,6 +65,14 @@ const fieldAliases={
 };
 function fieldValue(row,key){if(!row)return undefined;const aliases=fieldAliases[key]||[key];const entries=Object.entries(row);for(const alias of aliases){const exact=entries.find(([name,value])=>name===alias&&value!==''&&value!==null&&value!==undefined);if(exact)return exact[1];const normalized=cleanKey(alias);const match=entries.find(([name,value])=>cleanKey(name)===normalized&&value!==''&&value!==null&&value!==undefined);if(match)return match[1]}return undefined}
 const num=(row,key)=>parseNumber(fieldValue(row,key));
+// 'Conv real' (VENDEDOR_SEMANAL) a veces viene cargado como número entero de porcentaje (58, por
+// "58%") en vez de fracción (0.58) — inconsistencia de tipeo en el Sheet para esa fila puntual, no
+// arreglable desde acá salvo corrigiendo la carga. Una conversión real nunca puede superar 100%
+// (fracción > 1), así que si el valor ya viene así se asume ese caso y se normaliza dividiendo por
+// 100. Sin esto, promediar "0.58" (58%) junto con un "58" suelto (que en realidad también es 58%,
+// pero sin normalizar pesa como si fuera 5800%) disparaba "Conversión media" a 354% en Métricas
+// vendedores y el embudo mostraba más Ventas que Tráfico — imposible (bug real, auditoría 2026-09-06).
+const convRate=(row,key)=>{const v=num(row,key);return v>1?v/100:v};
 function normalizeDate(value){if(value instanceof Date&&!Number.isNaN(value.getTime()))return value.toISOString().slice(0,10);const text=String(value??'').trim();if(!text)return '';const iso=text.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return iso.slice(1).join('-');const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);if(dmy)return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;const parsed=new Date(text);return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10)}
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 function normalizeLocalName(value){const text=String(value??'').trim();return text?text.toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()):text}
@@ -363,10 +371,14 @@ function fusionarVendedoresCompartidos(rows){
     // ponderados por su propio peso natural: Conversión por Tráfico real, TP y PxT por Venta
     // (real u obj según corresponda) — mismo criterio que ranking-vdh.
     const promedioCol=(campo,pesoCampo)=>{const peso=sumaCol(pesoCampo);return peso?partes.reduce((s,r)=>s+num(r,campo)*num(r,pesoCampo),0)/peso:0};
+    // Conv real pasa por convRate (no num) antes de ponderar — si una de las filas a fundir viene
+    // con el problema de tipeo "58" en vez de "0.58" (ver convRate), promediarla cruda inflaba el
+    // resultado igual que en el resto de los usos de este campo.
+    const promedioColConv=pesoCampo=>{const peso=sumaCol(pesoCampo);return peso?partes.reduce((s,r)=>s+convRate(r,'Conv real')*num(r,pesoCampo),0)/peso:0};
     const base={...partes[0]};
     base.Local=localesDistintos.sort().join(' + ');
     ['Venta obj','Venta real','Tráfico real','Perfumes obj','Perfumes real','Boxer obj','Boxer real'].forEach(c=>{base[c]=sumaCol(c)});
-    base['Conv real']=promedioCol('Conv real','Tráfico real');
+    base['Conv real']=promedioColConv('Tráfico real');
     base['TP obj']=promedioCol('TP obj','Venta obj');
     base['TP real']=promedioCol('TP real','Venta real');
     base['PxT obj']=promedioCol('PxT obj','Venta obj');
@@ -604,7 +616,7 @@ function vendorHistory(){
     const key=row.Vendedor,obj=num(row,'Venta obj');
     if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),weeks:[]};
     row.Local.split(' + ').forEach(l=>groups[key].locales.add(l));
-    groups[key].weeks.push({weekKey:weekKeyOf(row),ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:num(row,'Conv real'),pxt:num(row,'PxT real')});
+    groups[key].weeks.push({weekKey:weekKeyOf(row),ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
   });
   return Object.values(groups).map(g=>{
     g.weeks.sort((a,b)=>weekKeyOrder(a.weekKey)-weekKeyOrder(b.weekKey));
@@ -623,7 +635,7 @@ function localHistory(){
     w.actual+=num(row,'Venta real');
     w.target+=num(row,'Venta obj');
     const tp=num(row,'TP real');if(tp){w.tpSum+=tp;w.tpCount++}
-    const conv=num(row,'Conv real');if(conv){w.convSum+=conv;w.convCount++}
+    const conv=convRate(row,'Conv real');if(conv){w.convSum+=conv;w.convCount++}
     const pxt=num(row,'PxT real');if(pxt){w.pxtSum+=pxt;w.pxtCount++}
   });
   return Object.keys(groups).map(loc=>{
@@ -735,7 +747,10 @@ function renderRankBadges(){
   const streakSellers=histories.map(h=>({local:h.local,name:h.name,streak:streakInfo(h.weeks)})).filter(h=>h.streak>=2).sort((a,b)=>b.streak-a.streak);
   const streakStores=storeHist.map(h=>({local:h.local,streak:streakInfo(h.weeks)})).filter(h=>h.streak>=2).sort((a,b)=>b.streak-a.streak);
 
-  const metricMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:percent},pxt:{label:'PxT',icon:'shirt',fmt:number}};
+  // fmt de conv multiplica por 100: el valor llega como fracción (convRate en vendorHistory/
+  // localHistory), igual que en cualquier otro lado del dashboard que muestra un % (auditoría
+  // 2026-09-06).
+  const metricMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:number}};
   const records=[];
   histories.forEach(h=>{
     if(h.weeks.length<2)return;
@@ -836,11 +851,14 @@ function renderEvolutionWeeks(weeks,heading){
     const prev=i>0?weeks[i-1]:null;
     const mejora=(prev&&w.ratio!==null&&prev.ratio!==null)?w.ratio-prev.ratio:null;
     const [mes,semana]=w.weekKey.split('|');
-    return `<tr><td class="seller-name">Semana ${semana} de ${mes}</td><td class="num">${w.ratio!==null?percent(w.ratio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${mejora!==null?`<span class="${mejora>=0?'positive':'negative'}">${mejora>=0?'+':''}${mejora.toFixed(1)} pts</span>`:'—'}</td><td class="num">${w.tp?money(w.tp):'—'}</td><td class="num">${w.conv?percent(w.conv):'—'}</td><td class="num">${w.pxt?number(w.pxt):'—'}</td></tr>`;
+    // w.conv ya viene como fracción (convRate en vendorHistory) — hay que *100 para mostrarlo como
+    // el resto del dashboard; antes se mostraba crudo (bug real, auditoría 2026-09-06).
+    return `<tr><td class="seller-name">Semana ${semana} de ${mes}</td><td class="num">${w.ratio!==null?percent(w.ratio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${mejora!==null?`<span class="${mejora>=0?'positive':'negative'}">${mejora>=0?'+':''}${mejora.toFixed(1)} pts</span>`:'—'}</td><td class="num">${w.tp?money(w.tp):'—'}</td><td class="num">${w.conv?percent(w.conv*100):'—'}</td><td class="num">${w.pxt?number(w.pxt):'—'}</td></tr>`;
   }).join('');
   $('evolutionTable').innerHTML=`<thead><tr><th>Semana</th><th>% cumplimiento</th><th>Mejora</th><th>Ticket prom.</th><th>Conversión</th><th>PxT</th></tr></thead><tbody>${rows}</tbody>`;
 
-  const badgeMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:percent},pxt:{label:'PxT',icon:'shirt',fmt:number}};
+  // fmt de conv multiplica por 100 — mismo motivo que metricMeta más arriba (auditoría 2026-09-06).
+  const badgeMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:number}};
   $('evolutionBadges').innerHTML=recordBadges.length?recordBadges.map(m=>{const meta=badgeMeta[m];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>Récord de ${meta.label}</strong><span>esta semana</span></div><span class="badge-value">${meta.fmt(rec[m].value)}</span></div>`}).join(''):'<div class="empty-state">Sin récords nuevos esta semana</div>';
 }
 function renderRankMejora(){
@@ -1041,7 +1059,7 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,conversion:0,ticket:0,garments:0,count:0};
     const group=groups[key];
     group.locales.add(row.Local);
-    group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=num(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++;
+    group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=convRate(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++;
   });
   // CRITERIO GENERAL DE ORDENAMIENTO: esta tabla (Detalle Individual, sección 04 Vendedores) no
   // tenía NINGÚN sort — mostraba a cada vendedor en el orden crudo en que aparecía en la planilla,
@@ -1082,7 +1100,10 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   renderTrafficFunnel('sellerFunnel',list.length>0,totalTraffic,avgConv);
   renderDiagnosisPanel('sellerDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderSellerFocus(list,metricsMonth);
-  const body=list.map(row=>{const ratio=row.target?row.sale/row.target:0;return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.count?row.conversion/row.count:0)}</td><td class="num">${money(row.count?row.ticket/row.count:0)}</td><td class="num">${number(row.count?row.garments/row.count:0)}</td><td class="num ${ratio>=1?'positive':ratio<.9?'negative':'warning'}">${percent(ratio*100)}</td></tr>`}).join('');$('sellerDetailTable').innerHTML=`<thead><tr><th>Vendedor</th><th>Local</th><th>Venta</th><th>Objetivo</th><th>Tráfico</th><th>Conversión</th><th>Ticket promedio</th><th>Prendas por ticket</th><th>% objetivo</th></tr></thead><tbody>${body||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;$('sellerDetailRowsCount').textContent=`${list.length} vendedores`}
+  // row.conversion ya viene como fracción (convRate al sumar más arriba) — hay que *100 para
+  // mostrarlo como el resto del dashboard; antes se mostraba crudo, mismo bug que dejaba
+  // "Conversión media" en 354% en la tarjeta de arriba (auditoría 2026-09-06).
+  const body=list.map(row=>{const ratio=row.target?row.sale/row.target:0;return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.count?row.conversion/row.count*100:0)}</td><td class="num">${money(row.count?row.ticket/row.count:0)}</td><td class="num">${number(row.count?row.garments/row.count:0)}</td><td class="num ${ratio>=1?'positive':ratio<.9?'negative':'warning'}">${percent(ratio*100)}</td></tr>`}).join('');$('sellerDetailTable').innerHTML=`<thead><tr><th>Vendedor</th><th>Local</th><th>Venta</th><th>Objetivo</th><th>Tráfico</th><th>Conversión</th><th>Ticket promedio</th><th>Prendas por ticket</th><th>% objetivo</th></tr></thead><tbody>${body||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;$('sellerDetailRowsCount').textContent=`${list.length} vendedores`}
 function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessoryMonthFilter','accessoryWeekFilter'),groups={};
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba con su venta de
   // perfumes/boxers y su objetivo partidos en dos filas, como si fueran dos vendedores distintos
