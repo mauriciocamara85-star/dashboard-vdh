@@ -1,5 +1,5 @@
 const DATA_ENDPOINT='https://script.google.com/macros/s/AKfycbyuS6K8oq2KWJ6BMSayHXHHSf0v2jr70OoSD4UfwX77cD3OobN1OrzFsTTXC6JI9Yo/exec';
-const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankCategory:'ticket',rankSortMode:'units',rankScope:'liga',evoScope:'seller',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
+const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',evoScope:'seller',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
 // de refresh) para reemplazar los emoji de navegación/medallero por vectores consistentes en el
@@ -420,13 +420,24 @@ const RANK_CATEGORIES={
 // Local/Vendedor de arriba): el puesto que da los puntos es el ranking real de la empresa,
 // no el de un local filtrado. Los filtros solo acotan qué filas se MUESTRAN en la tabla.
 const F1_MAIN_POINTS=[25,18,15,12,10,8,6,4,2,1];
-const F1_SPRINT_POINTS=[8,7,6,5,4,3,2,1];
+// Bajado de [8,7,6,5,4,3,2,1] el 2026-09-06, portado desde el repo hermano ranking-vdh (que ya
+// había hecho este cambio el 2026-09-04): con la escala vieja, barrer los 4 sprints (Ticket,
+// Perfumes, Bóxer, PxT) daba hasta 32 pts, más que ganar la Venta de la semana (25 pts la carrera
+// principal) — le podía ganar el puesto a quien más vendió. Con techo de 4 por sprint, barrer los
+// 4 da como máximo 16 pts, bien por debajo de ganar Venta — los sprints siguen sumando y
+// desempatando, pero ya no le ganan el puesto al que más vendió. Se mantienen los mismos 8 puestos
+// que puntúan (solo baja el valor). La usan tanto GP VDH de vendedores como Copa Constructores de
+// locales (ver buildStoreChampionship) — misma escala en las dos, para no puntuar distinto según
+// si el que suma es una persona o un local.
+const F1_SPRINT_POINTS=[4,3,2,1,1,1,1,1];
 const F1_SPRINT_FIELDS={ticket:'TP',perfumes:'Perfumes',boxer:'Boxer',pxt:'PxT'};
 function f1AllWeekKeys(){const rows=state.tables.VENDEDOR_SEMANAL||[];return[...new Set(rows.map(weekKeyOf))].sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b))}
-// Fundida siempre: f1WeekRows solo se usa para puntajes de PERSONAS (Liga/Sprints/GP VDH), nunca
-// para rankear locales, así que no hace falta una variante "cruda" acá como currentWeekRows/
-// currentWeekRowsPersonas.
+// Fundida: f1WeekRows se usa para puntajes de PERSONAS (Liga/Sprints/GP VDH). Copa Constructores
+// (locales) necesita la variante SIN fundir — ver f1WeekRowsCrudo más abajo — porque cada local
+// tiene que ver su propia venta real completa, no la mitad de un vendedor que cubrió dos locales
+// esa semana (mismo criterio que currentWeekRows/currentWeekRowsPersonas, ver esa nota más arriba).
 function f1WeekRows(weekKey){return fusionarVendedoresCompartidos((state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey))}
+function f1WeekRowsCrudo(weekKey){return(state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey)}
 // Empates: si dos personas quedan exactamente igual en % de cumplimiento, la posición (y los
 // puntos F1/Sprint que reparte esa posición) se define por mayor venta/unidad absoluta real y,
 // si también empatan ahí, alfabético — determinístico siempre, nunca "quien cargó primero en la
@@ -457,6 +468,78 @@ function buildGrandPrixStandings(){
   });
   const list=Object.values(totals).map(e=>({...e,local:[...e.locales].sort().join(' + '),total:e.main+e.sprint}));
   list.sort((a,b)=>(b.total-a.total)||(b.main-a.main)||String(a.name).localeCompare(String(b.name),'es'));
+  return{list,month,weeks:monthWeeks};
+}
+// ── COPA CONSTRUCTORES (mismo campeonato de puntos que GP VDH, pero agregado por LOCAL en vez de
+// por vendedor) — portado del repo hermano ranking-vdh (auditoría 2026-09-06), donde ya reemplazó
+// a un ranking de "mejora semanal por local" que se sacó por redundante con esto.
+function localDiarioWeekRows(weekKey){return(state.tables.LOCAL_DIARIO||[]).filter(r=>weekKeyOf(r)===weekKey)}
+// Venta/Ticket/PxT salen de LOCAL_DIARIO (el Objetivo/Venta real del LOCAL día a día, tal cual los
+// carga Ventas), NO de sumar el objetivo semanal de cada vendedor en VENDEDOR_SEMANAL — ese
+// objetivo sale de prorratear el % de objetivo MENSUAL de cada persona, y esos porcentajes entre
+// los vendedores de un local pueden sumar más del 100% del objetivo mensual real del local (pasa
+// en Rivadavia), inflando el objetivo semanal agregado. Perfumes/Bóxer sí siguen sumando de
+// VENDEDOR_SEMANAL (crudo, sin fundir vendedores compartidos — ver f1WeekRowsCrudo): son
+// cantidades reales sin un equivalente propio en LOCAL_DIARIO. Ticket usa el promedio simple de
+// "Ticket prom." diario del local (días con dato, sin ponderar por venta del día) — mismo criterio
+// que ya usa Tráfico para su propio total semanal.
+function aggregateStoreMetricForWeek(weekKey,field){
+  if(!field){
+    const groups={};
+    localDiarioWeekRows(weekKey).forEach(row=>{
+      const local=row.Local||'Sin local';
+      if(!groups[local])groups[local]={real:0,obj:0};
+      groups[local].real+=num(row,'Venta real');
+      groups[local].obj+=num(row,'Objetivo');
+    });
+    return groups;
+  }
+  if(field==='TP'||field==='PxT'){
+    const realKey=field==='TP'?'Ticket prom.':'PxT real',objKey=field==='TP'?'Ticket obj':'PxT obj';
+    const groups={};
+    localDiarioWeekRows(weekKey).forEach(row=>{
+      const local=row.Local||'Sin local';
+      if(!groups[local])groups[local]={sumReal:0,countReal:0,sumObj:0,countObj:0};
+      const g=groups[local],valReal=num(row,realKey),valObj=num(row,objKey);
+      if(valReal){g.sumReal+=valReal;g.countReal++}
+      if(valObj){g.sumObj+=valObj;g.countObj++}
+    });
+    return Object.fromEntries(Object.entries(groups).map(([local,g])=>[local,{real:g.countReal?g.sumReal/g.countReal:0,obj:g.countObj?g.sumObj/g.countObj:0}]));
+  }
+  // Solo llega acá Perfumes/Bóxer — cantidades reales, sumarlas por vendedor sigue siendo correcto.
+  const realKey=`${field} real`,objKey=`${field} obj`;
+  const groups={};
+  f1WeekRowsCrudo(weekKey).forEach(row=>{
+    const local=row.Local||'Sin local';
+    if(!groups[local])groups[local]={real:0,obj:0};
+    groups[local].real+=num(row,realKey);
+    groups[local].obj+=num(row,objKey);
+  });
+  return groups;
+}
+// Análogo a f1RatioStandings() pero agregado por LOCAL — mismo criterio de empates (mayor
+// venta/unidad real y, si también empata, alfabético).
+function storeRatioStandings(weekKey,field){
+  const agg=aggregateStoreMetricForWeek(weekKey,field);
+  const list=Object.entries(agg).map(([local,g])=>({local,real:g.real,obj:g.obj,ratio:g.obj?g.real/g.obj*100:null})).filter(p=>p.ratio!==null);
+  list.sort((a,b)=>(b.ratio-a.ratio)||(b.real-a.real)||String(a.local).localeCompare(String(b.local),'es'));
+  return list;
+}
+function buildStoreChampionship(){
+  const weeks=f1AllWeekKeys();
+  if(!weeks.length)return{list:[],month:null,weeks:[]};
+  const month=weeks[weeks.length-1].split('|')[0];
+  const monthWeeks=weeks.filter(k=>k.split('|')[0]===month);
+  const totals={};
+  const ensure=local=>{if(!totals[local])totals[local]={local,main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[local]};
+  monthWeeks.forEach(weekKey=>{
+    storeRatioStandings(weekKey,null).slice(0,10).forEach((p,i)=>{ensure(p.local).main+=F1_MAIN_POINTS[i]});
+    Object.entries(F1_SPRINT_FIELDS).forEach(([cat,field])=>{
+      storeRatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.local);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i]});
+    });
+  });
+  const list=Object.values(totals).map(e=>({...e,total:e.main+e.sprint}));
+  list.sort((a,b)=>(b.total-a.total)||(b.main-a.main)||String(a.local).localeCompare(String(b.local),'es'));
   return{list,month,weeks:monthWeeks};
 }
 function showRankGrandPrixEmpty(){
@@ -496,29 +579,36 @@ function renderRankGrandPrix(){
 // Insignias quedó sin botón en el menú (pedido explícito de limpieza) pero el código de
 // renderRankBadges() sigue acá sin usarse — reactivarla es agregar de vuelta su botón a
 // #rankScopeTabs, nada de esto se borró.
-const RANK_SHARED_SCOPES=['liga','mejora','sprints'];
-const SPRINT_CATEGORIES=['ticket','perfumes','boxer','pxt'];
+// Ranking (07) tiene dos niveles de pestaña, igual que el repo hermano ranking-vdh (auditoría
+// 2026-09-06): arriba el GRUPO (Vendedores/Locales/Evolución, #rankScopeTabs) y, debajo, la
+// CATEGORÍA dentro de ese grupo (#sellerCatTabs o #storeCatTabs, según el grupo activo) — antes
+// "Ticket/Perfumes/Boxer/PxT" de vendedores vivían escondidos atrás de un <select> ("Sprints VDH"),
+// y Locales no tenía categorías propias (una sola vista, Copa Constructores). Liga/GP/Mejora eran
+// además pestañas de PRIMER nivel sueltas, mezcladas con Locales/Evolución en la misma barra.
 function renderRanking(){
   qa('#rankScopeTabs .rank-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.scope===state.rankScope));
-  $('rankSellersPanel').hidden=!RANK_SHARED_SCOPES.includes(state.rankScope);
-  $('rankStoresPanel').hidden=state.rankScope!=='stores';
-  $('rankGpPanel').hidden=state.rankScope!=='campeonato';
-  $('rankReglasPanel').hidden=state.rankScope!=='reglas';
+  $('sellerCatTabs').hidden=state.rankScope!=='sellers';
+  $('storeCatTabs').hidden=state.rankScope!=='stores';
   $('rankEvolutionPanel').hidden=state.rankScope!=='evolution';
-  $('sprintPicker').hidden=state.rankScope!=='sprints';
-  if(state.rankScope==='stores'){renderRankStores();return}
-  if(state.rankScope==='campeonato'){renderRankGrandPrix();return}
-  if(state.rankScope==='evolution'){renderRankEvolution();return}
-  if(state.rankScope==='reglas'){$('rankingPeriodBadge').textContent='Reglamento';return}
+  if(state.rankScope==='evolution'){$('rankStoresPanel').hidden=true;$('rankSellersPanel').hidden=true;$('rankGpPanel').hidden=true;renderRankEvolution();return}
 
-  let category;
-  if(state.rankScope==='sprints'){
-    if(!SPRINT_CATEGORIES.includes(state.rankCategory))state.rankCategory='ticket';
-    category=state.rankCategory;
-    $('sprintCategorySelect').value=category;
-  }else{
-    category=state.rankScope; // 'liga' o 'mejora'
+  if(state.rankScope==='stores'){
+    $('rankSellersPanel').hidden=true;
+    $('rankGpPanel').hidden=true;
+    $('rankStoresPanel').hidden=false;
+    qa('#storeCatTabs .rank-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.storeCategory===state.storeCategory));
+    if(state.storeCategory==='constructores')renderRankStores();
+    else renderRankStoreCategory(state.storeCategory);
+    return;
   }
+
+  // state.rankScope==='sellers'
+  $('rankStoresPanel').hidden=true;
+  qa('#sellerCatTabs .rank-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.category===state.sellerCategory));
+  const category=state.sellerCategory;
+  $('rankGpPanel').hidden=category!=='campeonato';
+  $('rankSellersPanel').hidden=category==='campeonato';
+  if(category==='campeonato'){renderRankGrandPrix();return}
   const cfg=RANK_CATEGORIES[category];
   $('rankingKicker').textContent=cfg.kicker;
   $('rankingHeading').textContent=cfg.heading;
@@ -528,78 +618,89 @@ function renderRanking(){
   if(category==='mejora')renderRankMejora();
   else renderRankCategory(category);
 }
+function showStoreRankEmpty(){
+  $('rankingPeriodBadge').textContent='Sin fecha';
+  $('storeRankMetrics').innerHTML='';
+  $('storeRankTable').innerHTML='';
+  $('storeRankRowsCount').textContent='';
+}
+// Copa Constructores: mismo campeonato de puntos que GP VDH (arriba), agregado por local — quién
+// es el mejor LOCAL en todas las métricas (Venta + los 4 sprints), no solo quién vendió más esta
+// semana puntual. Reemplaza a la "mejora semanal por local" que había acá antes (sacada por
+// redundante, mismo criterio que ya se aplicó en ranking-vdh el 2026-09-04).
 function renderRankStores(){
-  const {rows,weekKeys}=currentWeekRows();
-  if(!weekKeys.length){
-    $('rankingPeriodBadge').textContent='Sin semana';
-    $('storeRankMetrics').innerHTML='';
-    $('storeRankTable').innerHTML='';
-    $('storeRankRowsCount').textContent='';
-    return;
-  }
-  const currentKey=weekKeys[weekKeys.length-1],prevKey=weekKeys.length>1?weekKeys[weekKeys.length-2]:null;
-  const [currentMes,currentSemana]=currentKey.split('|');
-  $('rankingPeriodBadge').textContent=prevKey?`Semana ${currentSemana} de ${currentMes} vs. semana anterior`:`Semana ${currentSemana} de ${currentMes} · primera semana registrada`;
+  $('storeRankKicker').textContent='ACUMULADO DEL MES';
+  $('storeRankHeading').textContent='Copa Constructores · Carrera Principal + Sprints VDH';
+  const{list,month,weeks}=buildStoreChampionship();
+  if(!month){showStoreRankEmpty();return}
+  $('rankingPeriodBadge').textContent=`${month} · ${weeks.length} fecha${weeks.length===1?'':'s'} corrida${weeks.length===1?'':'s'}`;
+  if(!list.length){showStoreRankEmpty();return}
 
-  const aggregateByLocal=weekKey=>{
-    const groups={};
-    rows.filter(row=>weekKeyOf(row)===weekKey).forEach(row=>{
-      const key=row.Local||'Sin local';
-      if(!groups[key])groups[key]={actual:0,target:0};
-      groups[key].actual+=num(row,'Venta real');
-      groups[key].target+=num(row,'Venta obj');
-    });
-    return groups;
-  };
-  const currentAgg=aggregateByLocal(currentKey),prevAgg=prevKey?aggregateByLocal(prevKey):{};
+  const local=$('localFilter').value;
+  const filtered=local==='all'?list:list.filter(p=>p.local===local);
+  const leader=list[0];
+  const totalPts=list.reduce((sum,p)=>sum+p.total,0);
 
-  const rachaByLocal={};
-  rows.filter(row=>weekKeyOf(row)===currentKey).forEach(row=>{
-    const key=row.Local||'Sin local',target=num(row,'Venta obj'),ratio=target?num(row,'Venta real')/target*100:0;
-    if(!rachaByLocal[key])rachaByLocal[key]=0;
-    if(ratio>=100)rachaByLocal[key]++;
-  });
+  $('storeRankMetrics').innerHTML=
+    metricsCard('Locales puntuando',number(list.length),'con al menos 1 punto este mes')+
+    (leader?metricsCard('Líder',escapeHtml(leader.local),`${number(leader.total)} pts`,'good'):metricsCard('Líder','—',''))+
+    metricsCard('Fechas corridas',number(weeks.length),month)+
+    metricsCard('Puntos repartidos',number(totalPts),'Carrera Principal + Sprints VDH');
 
-  const list=Object.keys(currentAgg).map(local=>{
-    const cur=currentAgg[local],actualRatio=cur.target?cur.actual/cur.target*100:null;
-    const prev=prevAgg[local],prevRatio=prev&&prev.target?prev.actual/prev.target*100:null;
-    const mejora=(actualRatio!==null&&prevRatio!==null)?actualRatio-prevRatio:null;
-    return{local,actual:cur.actual,target:cur.target,actualRatio,prevRatio,mejora,enRacha:rachaByLocal[local]||0};
-  });
-
-  list.sort((a,b)=>{
-    if(a.mejora!==null&&b.mejora!==null){if(b.mejora!==a.mejora)return b.mejora-a.mejora}
-    else if(a.mejora!==null)return -1;
-    else if(b.mejora!==null)return 1;
-    const ar=a.actualRatio??-Infinity,br=b.actualRatio??-Infinity;
-    if(br!==ar)return br-ar;
-    return String(a.local).localeCompare(String(b.local),'es');
-  });
-
-  const withMejora=list.filter(p=>p.mejora!==null);
-  const enMejora=withMejora.filter(p=>p.mejora>0).length;
-  const avgMejora=withMejora.length?withMejora.reduce((sum,p)=>sum+p.mejora,0)/withMejora.length:0;
-  const top=withMejora[0];
-  const parejo=list.length?list.reduce((a,b)=>b.enRacha>a.enRacha?b:a):null;
-
-  $('storeRankMetrics').innerHTML=list.length?
-    metricsCard('Locales rankeados',number(list.length),'según filtros')+
-    metricsCard('En mejora',number(enMejora),withMejora.length?`de ${withMejora.length} con semana anterior`:'sin semana anterior para comparar')+
-    (top?metricsCard('Mayor mejora',escapeHtml(top.local),`${top.mejora>=0?'+':''}${top.mejora.toFixed(1)} pts`,top.mejora>=0?'good':'bad'):metricsCard('Mayor mejora','—','esperando 2ª semana'))+
-    (parejo&&parejo.enRacha>0?metricsCard('Equipo más parejo',escapeHtml(parejo.local),`${parejo.enRacha} vendedor(es) en objetivo`,'good'):metricsCard('Equipo más parejo','—','nadie en objetivo esta semana'))
-    :'';
-
-  const body=list.map((p,i)=>{
-    const trophy=i===0?` ${icon('trophy','trophy-icon')}`:'';
-    const mejoraCell=p.mejora!==null?`<span class="${p.mejora>=0?'positive':'negative'}">${p.mejora>=0?'+':''}${p.mejora.toFixed(1)} pts</span>`:'<span class="missing-value">Primera semana</span>';
-    const trend=p.mejora===null?'—':p.mejora>0?'<span class="trend-up">▲</span>':p.mejora<0?'<span class="trend-down">▼</span>':'<span class="trend-flat">■</span>';
-    return `<tr><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name">${escapeHtml(p.local)}</td><td class="num">${money(p.actual)}</td><td class="num">${p.actualRatio!==null?percent(p.actualRatio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.prevRatio!==null?percent(p.prevRatio):'—'}</td><td class="num">${mejoraCell}</td><td class="num">${trend}</td><td class="num">${p.enRacha}</td></tr>`;
+  const body=filtered.map(p=>{
+    const i=list.indexOf(p),b=p.breakdown,trophy=i===0?` ${icon('trophy','trophy-icon')}`:'';
+    return `<tr><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name">${escapeHtml(p.local)}</td><td class="num">${number(p.main)}</td><td class="num">${number(b.ticket)}</td><td class="num">${number(b.perfumes)}</td><td class="num">${number(b.boxer)}</td><td class="num">${number(b.pxt)}</td><td class="num"><strong>${number(p.total)}</strong></td></tr>`;
   }).join('');
+  const head=`<thead><tr><th>#</th><th>Local</th><th>Principal</th><th>Sprint Ticket</th><th>Sprint Perfumes</th><th>Sprint Boxer</th><th>Sprint PxT</th><th>Total</th></tr></thead>`;
+  $('storeRankTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="8" class="empty-state">Sin puntos para este filtro</td></tr></tbody>`;
+  $('storeRankRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} locales`:'';
+}
+// Resto de categorías de Locales — mismo criterio que RANK_CATEGORIES de vendedores, pero sobre
+// storeRatioStandings(): ranking de UNA sola semana (la última cargada) por % de cumplimiento,
+// sin acumular puntos en el mes (eso es lo que hace Copa Constructores, arriba). Sprint Semanal
+// (field null → Venta) es la misma carrera principal que ya puntúa en Copa Constructores; las
+// otras 4 usan la escala de Sprint. Portado de STORE_CATEGORIES en ranking-vdh (auditoría
+// 2026-09-06), con los formatos (money/number) que ya usa el resto de este dashboard.
+const STORE_CATEGORIES={
+  sprint:{label:'Sprint Semanal',field:null,fmt:money,kicker:'RANKING SEMANAL',heading:'Venta de la semana, % de cumplimiento'},
+  ticket:{label:'Ticket Promedio',field:'TP',fmt:money,kicker:'SPRINT VDH · TICKET PROMEDIO',heading:'Promedio por venta, no volumen'},
+  pxt:{label:'PxT',field:'PxT',fmt:number,kicker:'SPRINT VDH · PRENDAS POR TICKET',heading:'Cross-sell de la semana'},
+  perfumes:{label:'Perfumes',field:'Perfumes',fmt:number,kicker:'SPRINT VDH · PERFUMES',heading:'Unidades vendidas en la semana'},
+  boxer:{label:'Bóxer',field:'Boxer',fmt:number,kicker:'SPRINT VDH · BOXER',heading:'Unidades vendidas en la semana'}
+};
+function renderRankStoreCategory(storeCategory){
+  const cfg=STORE_CATEGORIES[storeCategory];
+  $('storeRankKicker').textContent=cfg.kicker;
+  $('storeRankHeading').textContent=cfg.heading;
+  const weeks=f1AllWeekKeys();
+  if(!weeks.length){showStoreRankEmpty();return}
+  const currentKey=weeks[weeks.length-1];
+  const[mes,semana]=currentKey.split('|');
+  $('rankingPeriodBadge').textContent=`Semana ${semana} de ${mes}`;
+  const list=storeRatioStandings(currentKey,cfg.field);
+  if(!list.length){showStoreRankEmpty();return}
 
-  $('storeRankTable').innerHTML=list.length?
-    `<thead><tr><th>#</th><th>Local</th><th>Venta real</th><th>% semana actual</th><th>% semana anterior</th><th>Mejora</th><th>Tendencia</th><th>En objetivo</th></tr></thead><tbody>${body}</tbody>`
-    :`<thead><tr><th>#</th><th>Local</th><th>Venta real</th><th>% semana actual</th><th>% semana anterior</th><th>Mejora</th><th>Tendencia</th><th>En objetivo</th></tr></thead><tbody><tr><td colspan="8" class="empty-state">Sin datos para estos filtros</td></tr></tbody>`;
-  $('storeRankRowsCount').textContent=list.length?`${list.length} locales`:'';
+  const local=$('localFilter').value;
+  const filtered=local==='all'?list:list.filter(p=>p.local===local);
+  const leader=list[0];
+  const avgRatio=list.reduce((sum,p)=>sum+p.ratio,0)/list.length;
+  const totalReal=list.reduce((sum,p)=>sum+p.real,0);
+  const pointsTable=cfg.field?F1_SPRINT_POINTS:F1_MAIN_POINTS;
+
+  $('storeRankMetrics').innerHTML=
+    metricsCard('Locales rankeados',number(list.length),'con objetivo cargado esta semana')+
+    metricsCard(cfg.label,cfg.fmt(totalReal),'total de la semana')+
+    (leader?metricsCard('Líder',escapeHtml(leader.local),percent(leader.ratio),'good'):metricsCard('Líder','—',''))+
+    metricsCard('Cumplimiento promedio',percent(avgRatio),'entre los locales con objetivo cargado');
+
+  const body=filtered.map(p=>{
+    const i=list.indexOf(p),trophy=i===0?` ${icon('trophy','trophy-icon')}`:'';
+    const badge=i<pointsTable.length?`+${pointsTable[i]} pts`:'—';
+    return `<tr><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name">${escapeHtml(p.local)}</td><td class="num">${cfg.fmt(p.real)}</td><td class="num">${cfg.fmt(p.obj)}</td><td class="num">${percent(p.ratio)}</td><td class="num">${badge}</td></tr>`;
+  }).join('');
+  const head=`<thead><tr><th>#</th><th>Local</th><th>${cfg.label}</th><th>Objetivo</th><th>% cumplimiento</th><th>Puntos</th></tr></thead>`;
+  $('storeRankTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="6" class="empty-state">Sin locales para este filtro</td></tr></tbody>`;
+  $('storeRankRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} locales`:'';
 }
 function vendorHistory(){
   const local=$('localFilter').value,seller=$('sellerFilter').value;
@@ -1048,6 +1149,27 @@ function renderSeason(){
 }
 function periodRows(table,monthId,weekId,fromId=null,toId=null){const month=$(monthId).value,week=$(weekId).value,from=fromId?$(fromId).value:'',to=toId?$(toId).value:'';return (state.tables[table]||[]).filter(row=>(month==='all'||String(row.Mes??'')===month)&&(week==='all'||String(row.Semana??'')===week)&&( $('localFilter').value==='all'||String(row.Local??'')===$('localFilter').value)&&( $('sellerFilter').value==='all'||String(row.Vendedor??'')===$('sellerFilter').value)&&(!from||normalizeDate(row.Fecha||row['Fecha foto'])>=from)&&(!to||normalizeDate(row.Fecha||row['Fecha foto'])<=to))}
 function fillPeriodFilters(monthId,weekId){const months=[...new Set(allRows('VENDEDOR_SEMANAL').map(row=>row.Mes).filter(Boolean))];const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;const previousMonth=$(monthId).value;$(monthId).innerHTML=option('all','Todos los meses')+months.map(x=>option(x,x)).join('');$(monthId).value=months.includes(previousMonth)?previousMonth:'all';const month=$(monthId).value;const weeks=[...new Set(allRows('VENDEDOR_SEMANAL').filter(row=>month==='all'||String(row.Mes??'')===month).map(row=>row.Semana).filter(v=>v!==undefined&&v!==null))].sort((a,b)=>Number(a)-Number(b));const previousWeek=$(weekId).value;$(weekId).innerHTML=option('all','Todas las semanas')+weeks.map(x=>option(x,`Semana ${x}`)).join('');$(weekId).value=weeks.map(String).includes(previousWeek)?previousWeek:'all'}
+// Detalle individual (Métricas vendedores): mismo mecanismo de header clickeable que ya usan las
+// tablas de Locales/E-commerce (state.sort + renderTable), portado a mano acá porque esta tabla no
+// sale de filas crudas del Sheet sino de `list` ya agregado por vendedor (Venta/Tráfico/Conversión
+// son sumas y promedios propios, no una columna de una fila — renderTable() no aplica). Por
+// defecto (sin click todavía, o con otra tabla como último click) ordena por % objetivo
+// descendente, mismo criterio que ya usa el resto del dashboard — Liga VDH, GP VDH, etc. — con
+// venta real y nombre como desempate; un click en cualquier header pasa a ordenar por esa columna
+// (asc. la primera vez, desc. la segunda, mismo toggle que ya usan Locales/E-commerce).
+const SELLER_DETAIL_SORT={
+  name:p=>p.name,local:p=>p.local,sale:p=>p.sale,target:p=>p.target,traffic:p=>p.traffic,
+  conversionAvg:p=>p.conversionAvg,ticketAvg:p=>p.ticketAvg,garmentsAvg:p=>p.garmentsAvg,ratio:p=>p.ratio
+};
+function sortSellerDetail(list){
+  const active=state.sort.table==='sellerDetailTable'?SELLER_DETAIL_SORT[state.sort.key]:null;
+  list.sort((a,b)=>{
+    if(!active)return (b.ratio-a.ratio)||(b.sale-a.sale)||String(a.name).localeCompare(String(b.name),'es');
+    const av=active(a),bv=active(b);
+    if(typeof av==='string')return av.localeCompare(bv,'es')*state.sort.direction;
+    return (av<bv?-1:av>bv?1:0)*state.sort.direction;
+  });
+}
 function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba partido en dos
   // filas de esta tabla, cada una con la mitad de su venta y objetivo, como si fueran dos personas
@@ -1061,15 +1183,17 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     group.locales.add(row.Local);
     group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=convRate(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++;
   });
-  // CRITERIO GENERAL DE ORDENAMIENTO: esta tabla (Detalle Individual, sección 04 Vendedores) no
-  // tenía NINGÚN sort — mostraba a cada vendedor en el orden crudo en que aparecía en la planilla,
-  // no por rendimiento. Ordena de mayor a menor por % de cumplimiento de objetivo (mismo criterio
-  // que usa el resto del dashboard — Liga VDH, GP VDH, etc. — para no premiar volumen bruto de un
-  // local grande sobre el cumplimiento real de uno chico), con venta real y nombre como desempate.
-  const list=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + ')})).sort((a,b)=>{
-    const ar=a.target?a.sale/a.target:0,br=b.target?b.sale/b.target:0;
-    return (br-ar)||(b.sale-a.sale)||String(a.name).localeCompare(String(b.name),'es');
+  // Campos derivados calculados una sola vez acá (no en cada celda ni en el comparador) para poder
+  // ordenar por lo que el usuario realmente VE — el promedio de Conversión/Ticket/Prendas, no el
+  // acumulador crudo que suman más arriba (sumar esos acumuladores entre vendedores con distinta
+  // cantidad de semanas cargadas no da un promedio válido para ordenar).
+  const list=Object.values(groups).map(g=>{
+    const local=[...g.locales].sort().join(' + ');
+    const conversionAvg=g.count?g.conversion/g.count:0,ticketAvg=g.count?g.ticket/g.count:0,garmentsAvg=g.count?g.garments/g.count:0;
+    const ratio=g.target?g.sale/g.target:0;
+    return{...g,local,conversionAvg,ticketAvg,garmentsAvg,ratio};
   });
+  sortSellerDetail(list);
   const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;const daily=(state.tables.VENDEDOR_DIARIO||[]).filter(row=>rowMatchesFilters(row)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
   // VENDEDOR_DIARIO no trae una columna de objetivo diario propia (buscaba 'Objetivo del día', que
   // no existe en ninguna alias — daba siempre 0 y la card "Venta" de acá abajo nunca mostraba el %,
@@ -1100,10 +1224,24 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   renderTrafficFunnel('sellerFunnel',list.length>0,totalTraffic,avgConv);
   renderDiagnosisPanel('sellerDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderSellerFocus(list,metricsMonth);
-  // row.conversion ya viene como fracción (convRate al sumar más arriba) — hay que *100 para
-  // mostrarlo como el resto del dashboard; antes se mostraba crudo, mismo bug que dejaba
-  // "Conversión media" en 354% en la tarjeta de arriba (auditoría 2026-09-06).
-  const body=list.map(row=>{const ratio=row.target?row.sale/row.target:0;return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.count?row.conversion/row.count*100:0)}</td><td class="num">${money(row.count?row.ticket/row.count:0)}</td><td class="num">${number(row.count?row.garments/row.count:0)}</td><td class="num ${ratio>=1?'positive':ratio<.9?'negative':'warning'}">${percent(ratio*100)}</td></tr>`}).join('');$('sellerDetailTable').innerHTML=`<thead><tr><th>Vendedor</th><th>Local</th><th>Venta</th><th>Objetivo</th><th>Tráfico</th><th>Conversión</th><th>Ticket promedio</th><th>Prendas por ticket</th><th>% objetivo</th></tr></thead><tbody>${body||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;$('sellerDetailRowsCount').textContent=`${list.length} vendedores`}
+  // row.conversionAvg ya viene como fracción (convRate al sumar más arriba, promediada en el .map
+  // de más arriba) — hay que *100 para mostrarlo como el resto del dashboard; antes se mostraba
+  // crudo, mismo bug que dejaba "Conversión media" en 354% en la tarjeta de arriba (auditoría
+  // 2026-09-06).
+  const headerCell=(label,key)=>{const active=state.sort.table==='sellerDetailTable'&&state.sort.key===key;return `<th data-sort="${key}">${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`};
+  const body=list.map(row=>`<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${number(row.garmentsAvg)}</td><td class="num ${row.ratio>=1?'positive':row.ratio<.9?'negative':'warning'}">${percent(row.ratio*100)}</td></tr>`).join('');
+  $('sellerDetailTable').innerHTML=`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Venta','sale')}${headerCell('Objetivo','target')}${headerCell('Tráfico','traffic')}${headerCell('Conversión','conversionAvg')}${headerCell('Ticket promedio','ticketAvg')}${headerCell('Prendas por ticket','garmentsAvg')}${headerCell('% objetivo','ratio')}</tr></thead><tbody>${body||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;
+  $('sellerDetailRowsCount').textContent=`${list.length} vendedores`;
+  // Mismo patrón de click que renderTable(): un click ordena por esa columna (guardando qué tabla
+  // fue, para no pisar el sort de otra tabla que comparta nombre de columna) y dispara un
+  // re-render completo — el próximo renderSellerMetrics() ya sale ordenado con sortSellerDetail().
+  qa('#sellerDetailTable th[data-sort]').forEach(th=>th.addEventListener('click',()=>{
+    const key=th.dataset.sort;
+    const same=state.sort.table==='sellerDetailTable'&&state.sort.key===key;
+    state.sort={key,direction:same?-state.sort.direction:1,table:'sellerDetailTable'};
+    render();
+  }));
+}
 function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessoryMonthFilter','accessoryWeekFilter'),groups={};
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba con su venta de
   // perfumes/boxers y su objetivo partidos en dos filas, como si fueran dos vendedores distintos
@@ -1168,17 +1306,15 @@ function renderOverview(){
   const restanteMes=monthTarget?Math.max(0,monthTarget-a.actual):null;
   const ritmoNecesario=restanteMes!==null?restanteMes/diasRestantes:null;
 
-  // Cierre estimado: mismo cálculo ponderado a los últimos días cargados que antes vivía como
-  // bloque secundario de "Lectura rápida" — ahora es su propia tarjeta arriba; Lectura Rápida
-  // (renderDeviation) quedó enfocada solo en diagnosticar la brecha actual, no en proyectarla.
-  // "Cargado" = Venta real > 0, mismo criterio que usa el SUMPRODUCTO de la planilla de cada local
-  // (auditoría 2026-09-06) — antes contaba un día como cargado con solo tráfico/visitas sin venta,
-  // que la planilla no cuenta para su propia ponderación.
-  const perDateMonth={};
-  monthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,target:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].target+=num(row,'Objetivo')});
-  const loadedActual={},loadedTarget={};
-  Object.keys(perDateMonth).forEach(d=>{if(perDateMonth[d].actual>0){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}});
-  const proj=Object.keys(loadedActual).length?projectMonth(loadedActual,daysInCalendarMonth(Object.keys(loadedActual).sort().pop()),loadedTarget,monthTarget):null;
+  // Cierre estimado: suma la proyección ponderada propia de cada local + la de e-commerce (ver
+  // sumEntityProjections) — antes mezclaba la Venta real/Objetivo de TODOS los locales y
+  // e-commerce en una sola bolsa por fecha y sacaba un único ratio sobre ese total, lo que pesaba
+  // de más al local/canal con más Objetivo acumulado y no cerraba contra "Todos los locales" +
+  // "E-commerce" sumados por separado (hasta 3,2% de diferencia, auditoría 2026-09-06). "Cargado" =
+  // Venta real > 0, mismo criterio que usa el SUMPRODUCTO de la planilla de cada local — antes
+  // contaba un día como cargado con solo tráfico/visitas sin venta, que la planilla no cuenta para
+  // su propia ponderación.
+  const proj=sumEntityProjections(monthRows,row=>row.Local||row.Canal);
   const desvioProy=proj?proj.ponderada-monthTarget:null;
   const cierreTrend=proj?kpiTrendRow(desvioProy,`${desvioProy>=0?'+':''}${money(desvioProy)} vs. objetivo del mes`):null;
 
@@ -1669,7 +1805,11 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   const local=$('localFilter').value,currentMonth=currentMonthOf('LOCAL_DIARIO');
   const allMonthRows=(state.tables.LOCAL_DIARIO||[]).filter(row=>(local==='all'||String(row.Local??'')===local)&&(!currentMonth||String(row.Mes??'')===currentMonth));
   const monthTarget=aggregate(allMonthRows).target;
-  const projection=storeProjection(allMonthRows);
+  // Agrupado por Local (aunque el filtro esté en un solo local, ahí da 1 solo grupo y el mismo
+  // resultado de antes): con "Todos los locales" seleccionado, suma la proyección propia de cada
+  // local en vez de mezclar la Venta real/Objetivo de los 13 en una sola bolsa (ver
+  // sumEntityProjections, auditoría 2026-09-06).
+  const projection=sumEntityProjections(allMonthRows,row=>row.Local);
   const daily=storeDailySeries(rows);
   const kpiCtx={a,ratio,avgConv,avgConvObj,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection};
   renderStoreKpiGrid(kpiCtx);
@@ -1681,13 +1821,10 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   const columns=[['Fecha','Fecha'],['Local','Local'],['Día','Día'],['Objetivo','Objetivo'],['Venta real','Venta real'],['Desvío','__delta'],['Tráfico','Tráfico real'],['Conversión','Conversión'],['Ticket','Ticket prom.']];renderTable('storeTable',rows,columns,row=>({...row,__delta:num(row,'Venta real')-num(row,'Objetivo')}),4);$('storeRowsCount').textContent=`${rows.length} días`}
 
 // ── Cabecera de "Locales": 6 tarjetas selectoras + gráfico dinámico ──────────
-// Proyección de cierre SOLO con LOCAL_DIARIO (a diferencia del "Cierre estimado" del Resumen
-// General, que puede sumar e-commerce) — acá es la red física sola. monthRows YA es el mes completo
-// del local (ver renderStores(), no filtrado por fecha), así que sirve tal cual tanto para el
-// objetivo total del mes como para el objetivo acumulado de los días con venta — ver projectMonth().
-// "Cargado" = Venta real > 0 (no "hay tráfico pero sin venta cargada" como antes): mismo criterio
-// exacto que usa el SUMPRODUCTO de la planilla de cada local, para que el día a día que entra en la
-// ponderación sea idéntico al de la planilla (auditoría 2026-09-06).
+// Proyección de cierre de UNA sola entidad (un local, o un canal) — monthRows tiene que venir ya
+// filtrado a esa entidad. "Cargado" = Venta real > 0 (no "hay tráfico pero sin venta cargada" como
+// antes): mismo criterio exacto que usa el SUMPRODUCTO de la planilla de cada local, para que el
+// día a día que entra en la ponderación sea idéntico al de la planilla (auditoría 2026-09-06).
 function storeProjection(monthRows){
   const perDate={};
   monthRows.forEach(row=>{
@@ -1706,6 +1843,34 @@ function storeProjection(monthRows){
   const dates=Object.keys(loadedActual);
   if(!dates.length)return null;
   return projectMonth(loadedActual,daysInCalendarMonth(dates.sort().pop()),loadedTarget,monthTarget);
+}
+// Suma la proyección de VARIAS entidades (cada local, o Locales+E-commerce) para un total agregado
+// — a diferencia de tirar la Venta real/Objetivo de todas las entidades juntas en una sola bolsa y
+// recién ahí sacar un único ratio ponderado (lo que hacían antes tanto "Todos los locales" como el
+// "Cierre estimado" combinado de Resumen General, pasándole storeProjection() directo a un
+// monthRows con varios locales/canales adentro). Mezclar primero pesa de más a la entidad con más
+// Objetivo acumulado o más días cargados en vez de respetar la trayectoria propia de cada una, así
+// que "Todos los locales" no cerraba contra la suma de la proyección de cada local en su propia
+// pestaña, ni el Cierre Estimado de arriba contra "Locales + E-commerce" por separado — hasta 3,2%
+// de diferencia detectados en auditoría 2026-09-06. groupKey identifica la entidad de cada fila
+// (row.Local para locales, row.Canal para e-commerce); cada grupo corre storeProjection() —la MISMA
+// fórmula ya verificada contra la planilla real— por separado y se suman los $ resultantes.
+// dias/diasRestantes no se suman entre entidades (no tiene sentido "15 días restantes" x 13
+// locales): se muestran una sola vez, calculados sobre el pool completo sin agrupar, mismo criterio
+// de "días cargados" que ya usan Ritmo necesario/Avance del mes en Resumen General.
+function sumEntityProjections(monthRows,groupKey){
+  const groups={};
+  monthRows.forEach(row=>{const key=groupKey(row)||'—';(groups[key]=groups[key]||[]).push(row)});
+  const entries=Object.values(groups).map(storeProjection).filter(Boolean);
+  if(!entries.length)return null;
+  const overall=storeProjection(monthRows);
+  return{
+    dias:overall?overall.dias:entries[0].dias,
+    diasRestantes:overall?overall.diasRestantes:entries[0].diasRestantes,
+    actual:entries.reduce((sum,p)=>sum+p.actual,0),
+    ponderada:entries.reduce((sum,p)=>sum+p.ponderada,0),
+    lineal:entries.reduce((sum,p)=>sum+p.lineal,0)
+  };
 }
 function storeDailySeries(rows){
   const byDate={};
@@ -2242,7 +2407,7 @@ function renderRentabilidad(){
 
 function scheduleRefresh(){clearInterval(state.timer);state.timer=null}
 $('overviewGreeting').textContent=pickGreeting();
-applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));$('sprintCategorySelect').addEventListener('change',()=>{state.rankCategory=$('sprintCategorySelect').value;renderRanking()});qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('#evolutionScopeToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.evoScope=button.dataset.evoscope;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
+applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('#evolutionScopeToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.evoScope=button.dataset.evoscope;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
 // ── BOTTOM NAV + DRAWER (mobile) ──────────────────────────────
 qa('.bottom-nav-item[data-view]').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 function openMainDrawer(){$('mainDrawerBackdrop').hidden=false;$('mainDrawerPanel').hidden=false;$('mainDrawerToggle').setAttribute('aria-expanded','true')}

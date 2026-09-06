@@ -398,18 +398,6 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .sprint-picker{display:flex;align-items:center;gap:10px;margin-bottom:16px}
 .sprint-picker label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
 .sprint-picker select{height:36px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--white);padding:0 12px;font:600 13px var(--sans)}
-.reglas-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
-.reglas-panel-simple,.reglas-panel-cash{grid-column:1 / -1}
-.reglas-copy{margin:0 0 16px;color:var(--soft);font-size:13px;line-height:1.5}
-.reglas-panel-simple .reglas-copy,.reglas-panel-cash .reglas-copy{margin-bottom:0}
-.reglas-points{display:flex;flex-wrap:wrap;gap:8px}
-.reglas-point{flex:1 1 68px;min-width:68px;text-align:center;background:var(--ink);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 6px}
-.reglas-point.top{border-color:var(--coral);background:linear-gradient(180deg,rgba(249,115,22,.14),var(--ink) 70%)}
-.reglas-point .pos{display:block;font:700 13px var(--display);color:var(--muted)}
-.reglas-point.top .pos{color:var(--coral)}
-.reglas-point strong{display:block;font:700 17px var(--display);color:var(--white);margin-top:3px}
-.reglas-panel-cash{border-color:var(--mint)}
-@media (max-width:900px){.reglas-grid{grid-template-columns:1fr}}
 .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px;margin-bottom:19px}
 .panel-head h2{font:600 17px var(--display);margin:4px 0 0}
 .panel-note{color:var(--muted);font-size:11px;padding-top:3px}
@@ -554,6 +542,8 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .table-wrap table{border-collapse:collapse;width:100%;text-align:left;font-size:12px}
 .table-wrap table.table-wide{min-width:720px}
 .table-wrap th{background:var(--sub);color:#D8E4F2;font-size:10px;letter-spacing:.5px;font-weight:700;text-transform:uppercase;padding:11px 12px;white-space:nowrap}
+.table-wrap th[data-sort]{cursor:pointer;user-select:none}
+.table-wrap th[data-sort]:hover{color:var(--white)}
 .table-wrap td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--soft);white-space:nowrap}
 .table-wrap tbody tr:nth-child(even){background:var(--row2)}
 .table-wrap tbody tr:nth-child(odd){background:var(--row)}
