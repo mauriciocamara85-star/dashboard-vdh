@@ -1567,8 +1567,19 @@ function priorSemesterSeries(thisSemesterStartRef){
 // pegado en el primer mes cargado (Septiembre) para siempre. Usado por monthContext() (Resumen
 // General) y renderStores() (Proyección de Cierre de Locales) — mismo criterio que ya usa
 // renderSeason() para `monthsPresent` (bug real, auditoría 2026-09-05).
+// "Presente en la tabla" se filtra primero a filas con datos REALES cargados (Venta real/Tráfico
+// real), no a cualquier fila con Mes: ECOM_DIARIO viene con el esqueleto de los 6 meses del
+// semestre precargado desde el arranque (Objetivo diario ya calculado por fórmula para Septiembre→
+// Febrero aunque todavía no se haya vendido nada), así que sin este filtro el "mes vigente" daba
+// Febrero en vez de Septiembre y la Proyección Ponderada de E-commerce quedaba vacía ("Sin días
+// cargados todavía este mes", aunque sí había 5 días cargados) — bug real, auditoría 2026-09-06.
+// Si ninguna fila tiene datos reales todavía (canal recién armado, nada cargado) cae al set
+// completo de meses presentes como antes, para no devolver '' de entrada.
 function currentMonthOf(tableName){
-  const monthsPresent=[...new Set((state.tables[tableName]||[]).map(row=>row.Mes).filter(Boolean))];
+  const rows=state.tables[tableName]||[];
+  const loadedRows=rows.filter(row=>num(row,'Venta real')||num(row,'Tráfico real'));
+  const source=loadedRows.length?loadedRows:rows;
+  const monthsPresent=[...new Set(source.map(row=>row.Mes).filter(Boolean))];
   return monthsPresent.sort((a,b)=>MONTH_ORDER.indexOf(a)-MONTH_ORDER.indexOf(b)).pop()||'';
 }
 function monthContext(){
