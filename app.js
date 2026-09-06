@@ -1734,7 +1734,12 @@ function renderStoreKpiGrid(ctx){
   qa('#storeKpiGrid .store-kpi-card').forEach(btn=>btn.classList.toggle('active',btn.dataset.storeMetric===state.storeMetric));
 
   $('storeKpiValue-venta').textContent=money(a.actual);
-  $('storeKpiSub-venta').textContent=`${percent(ratio*100)} de avance`;
+  // "X% del objetivo a la fecha" (no "X% de avance del mes"): esto compara contra lo esperado A LA
+  // FECHA (prorrateado a los días ya transcurridos/filtrados), no contra el objetivo del MES
+  // completo — son dos preguntas distintas ("¿voy al ritmo esperado hoy?" vs "¿cuánto del mes ya
+  // cerré?"). La planilla de cada local usa esa segunda definición para su "Avance del mes" — el
+  // texto viejo ("X% de avance") se prestaba a confundir los dos (auditoría 2026-09-06).
+  $('storeKpiSub-venta').textContent=`${percent(ratio*100)} del objetivo a la fecha`;
 
   if(projection){
     const desvio=projection.ponderada-monthTarget;
@@ -1895,7 +1900,12 @@ function renderEcommerce(){
   const diasEnMes=daysInCalendarMonth(cutoff);
   const diasTranscurridos=loadedDates.length,diasRestantes=Math.max(0,diasEnMes-diasTranscurridos);
   const ritmoNecesario=diasRestantes?Math.max(0,-delta)/diasRestantes:0;
-  $('ecomMetrics').innerHTML=metricsCard('Avance del mes',percent(ratio*100),'% del objetivo',statusTone(ratio))+metricsCard('Venta acumulada',money(a.actual),`${diasTranscurridos} días cargados`)+metricsCard('Desvío acumulado',money(delta),delta>=0?'por encima de lo esperado':diasTranscurridos?'por debajo de lo esperado':'aún sin días cargados',delta>=0?'good':'bad')+metricsCard('Ritmo necesario',money(ritmoNecesario),`${diasRestantes} días restantes`);
+  // "Cumplimiento a la fecha", no "Avance del mes": ratio compara contra a.target, que es el
+  // objetivo PRORRATEADO a los días ya cargados/filtrados, no el objetivo del MES completo — el
+  // nombre viejo prometía "avance del mes" (como el de las planillas de cada local, venta acumulada
+  // sobre objetivo TOTAL del mes) pero calculaba otra cosa (mismo tipo de confusión ya corregida en
+  // Locales, auditoría 2026-09-06).
+  $('ecomMetrics').innerHTML=metricsCard('Cumplimiento a la fecha',percent(ratio*100),'% del objetivo esperado',statusTone(ratio))+metricsCard('Venta acumulada',money(a.actual),`${diasTranscurridos} días cargados`)+metricsCard('Desvío acumulado',money(delta),delta>=0?'por encima de lo esperado':diasTranscurridos?'por debajo de lo esperado':'aún sin días cargados',delta>=0?'good':'bad')+metricsCard('Ritmo necesario',money(ritmoNecesario),`${diasRestantes} días restantes`);
 
   const totals=weekly.reduce((acc,row)=>{acc.visitas+=num(row,'Visitas');acc.carritos+=num(row,'Carritos');acc.compras+=num(row,'Compras');acc.facturacion+=num(row,'Facturación');acc.visitasMeta+=num(row,'Visitas Meta');acc.ventasMeta+=num(row,'Ventas Meta');acc.facturacionMeta+=num(row,'Facturación Meta');acc.inversion+=num(row,'Inversión sin imp.');return acc},{visitas:0,carritos:0,compras:0,facturacion:0,visitasMeta:0,ventasMeta:0,facturacionMeta:0,inversion:0});
   const carVis=totals.visitas?totals.carritos/totals.visitas*100:0,comCar=totals.carritos?totals.compras/totals.carritos*100:0;
