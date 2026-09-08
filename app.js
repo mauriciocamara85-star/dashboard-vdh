@@ -79,6 +79,19 @@ function normalizeLocalName(value){const text=String(value??'').trim();return te
 function normalizeLocalNames(tables){Object.keys(tables).forEach(name=>{(tables[name]||[]).forEach(row=>{if(row&&typeof row==='object'&&'Local'in row)row.Local=normalizeLocalName(row.Local)})})}
 function setStatus(text,online=false){$('connectionLabel').textContent=text;$('dataStatus').textContent=text;q('.pulse').classList.toggle('online',online)}
 function showError(text){$('errorBanner').textContent=text;$('errorBanner').hidden=!text}
+// Pantalla de carga inicial (#appLoading, ver index.html/styles.css) — tapa .main-content mientras
+// llega la PRIMERA respuesta del endpoint, para no dejar los 8 paneles mostrando "Sin datos"/"—" a
+// la vez como si la app estuviera rota. Se apaga una sola vez (agregar la clase de nuevo no hace
+// nada) desde el finally de loadData(), haya salido bien o mal — si falla, el error banner ya
+// cuenta la historia, no tiene sentido dejar el spinner girando para siempre.
+function hideAppLoading(){$('appLoading').classList.add('is-loaded')}
+// Feedback de refresh: gira el ícono mientras loadData() está en vuelo y tira una confirmación
+// chica al lado del botón cuando termina bien — antes la única señal de éxito era el punto verde
+// de la sidebar, lejos de donde el usuario tocó ↻. disabled evita un doble-click que dispare dos
+// fetch en paralelo.
+function startRefreshSpin(){const btn=$('refreshButton');btn.classList.add('is-spinning');btn.disabled=true}
+function stopRefreshSpin(){const btn=$('refreshButton');btn.classList.remove('is-spinning');btn.disabled=false}
+function flashRefreshConfirm(text){const el=$('refreshConfirm');el.textContent=text;el.classList.add('show');clearTimeout(flashRefreshConfirm.timer);flashRefreshConfirm.timer=setTimeout(()=>el.classList.remove('show'),2200)}
 function rowMatchesFilters(row,allowSeller=true){const local=$('localFilter').value,from=$('fromDate').value,to=$('toDate').value,seller=$('sellerFilter').value;return (local==='all'||String(row.Local??'')===local)&&(!from||normalizeDate(row.Fecha||row['Fecha foto'])>=from)&&(!to||normalizeDate(row.Fecha||row['Fecha foto'])<=to)&&(!allowSeller||seller==='all'||String(row.Vendedor??'')===seller)}
 function weekDates(row){const localDates=(state.tables.LOCAL_DIARIO||[]).filter(item=>String(item.Local??'')===String(row.Local??'')&&String(item.Mes??'')===String(row.Mes??'')&&String(item.Semana??'')===String(row.Semana??'')).map(item=>normalizeDate(item.Fecha));const sellerDates=(state.tables.VENDEDOR_DIARIO||[]).filter(item=>String(item.Local??'')===String(row.Local??'')&&String(item.Mes??'')===String(row.Mes??'')&&String(item.Semana??'')===String(row.Semana??'')).map(item=>normalizeDate(item.Fecha));return [...new Set([...localDates,...sellerDates].filter(Boolean))].sort()}
 function weekMatchesRange(row){const from=$('fromDate').value,to=$('toDate').value;if(!from&&!to)return true;const dates=weekDates(row);return dates.length>=7&&(!from||dates[0]>=from)&&(!to||dates[dates.length-1]<=to)}
@@ -123,7 +136,28 @@ function todayKey(){const today=new Date();return `${today.getFullYear()}-${Stri
 function lastLoadedDate(name){const rows=state.tables[name]||[];const dates=rows.filter(row=>num(row,'Venta real')||num(row,'Tráfico real')||num(row,'Ticket prom.')).map(row=>normalizeDate(row.Fecha)).filter(Boolean).sort();return dates.length?dates[dates.length-1]:''}
 function objectiveCutoff(){return $('toDate').value||lastLoadedDate('LOCAL_DIARIO')||todayKey()}
 function rowsThroughToday(rows){const cutoff=objectiveCutoff();return rows.filter(row=>{const date=normalizeDate(row.Fecha||row['Fecha foto']);return date&&date<=cutoff})}
-async function loadData(){if(!state.endpoint){setStatus('Sin configurar');showError('No hay una fuente de datos configurada en este navegador.');return}setStatus('Conectando...');showError('');const controller=new AbortController();const timeoutId=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(state.endpoint,{cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const data=await response.json();state.tables=Array.isArray(data)?{LOCAL_DIARIO:data}:{...data};normalizeLocalNames(state.tables);fillFilters();render();const now=new Date();const stamp=now.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short'});$('lastRefresh').textContent=`actualizado ${stamp}`;$('footerUpdated').textContent=`Última actualización: ${stamp}`;$('overviewUpdated').textContent=`Datos actualizados ${stamp}`;setStatus('Conectado',true)}catch(error){const timedOut=error.name==='AbortError';setStatus('Error de conexión');showError(timedOut?'El consolidador tardó demasiado en responder (más de 20s). Probá actualizar de nuevo.':`No se pudieron cargar los datos del consolidado. Detalle: ${error.message}`)}finally{clearTimeout(timeoutId)}}
+async function loadData(){
+  if(!state.endpoint){setStatus('Sin configurar');showError('No hay una fuente de datos configurada en este navegador.');hideAppLoading();return}
+  setStatus('Conectando...');showError('');startRefreshSpin();
+  const controller=new AbortController();const timeoutId=setTimeout(()=>controller.abort(),20000);
+  try{
+    const response=await fetch(state.endpoint,{cache:'no-store',signal:controller.signal});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const data=await response.json();
+    state.tables=Array.isArray(data)?{LOCAL_DIARIO:data}:{...data};
+    normalizeLocalNames(state.tables);fillFilters();render();
+    const now=new Date();const stamp=now.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short'});
+    $('lastRefresh').textContent=`actualizado ${stamp}`;$('footerUpdated').textContent=`Última actualización: ${stamp}`;$('overviewUpdated').textContent=`Datos actualizados ${stamp}`;
+    setStatus('Conectado',true);
+    flashRefreshConfirm('Actualizado ✓');
+  }catch(error){
+    const timedOut=error.name==='AbortError';
+    setStatus('Error de conexión');
+    showError(timedOut?'El consolidador tardó demasiado en responder (más de 20s). Probá actualizar de nuevo.':`No se pudieron cargar los datos del consolidado. Detalle: ${error.message}`);
+  }finally{
+    clearTimeout(timeoutId);hideAppLoading();stopRefreshSpin();
+  }
+}
 function metricsCard(label,value,detail='',tone=''){return `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-detail ${tone}">${detail}</div></div>`}
 function aggregate(rows){return rows.reduce((acc,row)=>{acc.target+=num(row,'Objetivo')||num(row,'Venta obj');acc.actual+=num(row,'Venta real')||num(row,'Facturación');acc.traffic+=num(row,'Tráfico real')||num(row,'Visitas');acc.targetTraffic+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');acc.orders+=num(row,'Q Ventas')||num(row,'Compras');return acc},{target:0,actual:0,traffic:0,targetTraffic:0,orders:0})}
 function statusTone(value){return value>=1?'good':value>=.9?'warning':'bad'}
@@ -274,7 +308,7 @@ function renderStoreFocus(rows){
   }
   const focusRows=computeStoreFocusRows(rows);
   $('storeFocusRowsCount').textContent=`${focusRows.length} locales`;
-  $('storeFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Local</th><th>Conversión</th><th>Ticket promedio</th><th>Tráfico</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="num">${r.trafficRatio!==null?percent(r.trafficRatio*100):number(r.traffic||0)}</td><td class="num ${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
+  $('storeFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Local</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th class="align-right">Tráfico</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="num">${r.trafficRatio!==null?percent(r.trafficRatio*100):number(r.traffic||0)}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
 }
 // Conversión/Ticket objetivo son un valor mensual del LOCAL (no por vendedor, ver mapa de celdas del
 // Sheet), así que el objetivo de cada vendedor para el diagnóstico es el de SU local — se cruza contra
@@ -318,7 +352,7 @@ function renderSellerFocus(list,month){
   }
   const focusRows=computeSellerFocusRows(list,month);
   $('sellerFocusRowsCount').textContent=`${focusRows.length} vendedores`;
-  $('sellerFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Vendedor</th><th>Local</th><th>Conversión</th><th>Ticket promedio</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.name)}</td><td class="seller-location">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="num ${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
+  $('sellerFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Vendedor</th><th>Local</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.name)}</td><td class="seller-location">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
 }
 // Pestañas "Resumen"/"Foco" de Locales y Métricas vendedores — mismo patrón que rankScopeTabs de
 // Ranking (tabs con data-tab + toggle de "active" y de paneles hidden), sin acoplarlas entre sí:
@@ -572,7 +606,7 @@ function renderRankGrandPrix(){
     const i=list.indexOf(p),b=p.breakdown;
     return `<tr><td class="num">${rankPos(i)}</td><td class="seller-name">${escapeHtml(p.name)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${number(p.main)}</td><td class="num">${number(b.ticket)}</td><td class="num">${number(b.perfumes)}</td><td class="num">${number(b.boxer)}</td><td class="num">${number(b.pxt)}</td><td class="num"><strong>${number(p.total)}</strong></td></tr>`;
   }).join('');
-  const head=`<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>Principal</th><th>Sprint Ticket</th><th>Sprint Perfumes</th><th>Sprint Boxer</th><th>Sprint PxT</th><th>Total</th></tr></thead>`;
+  const head=`<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">Principal</th><th class="align-right">Sprint Ticket</th><th class="align-right">Sprint Perfumes</th><th class="align-right">Sprint Boxer</th><th class="align-right">Sprint PxT</th><th class="align-right">Total</th></tr></thead>`;
   $('gpTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="9" class="empty-state">Sin puntos para estos filtros</td></tr></tbody>`;
   $('gpRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} pilotos`:'';
 }
@@ -651,7 +685,7 @@ function renderRankStores(){
     const i=list.indexOf(p),b=p.breakdown,trophy=i===0?` ${icon('trophy','trophy-icon')}`:'';
     return `<tr><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name">${escapeHtml(p.local)}</td><td class="num">${number(p.main)}</td><td class="num">${number(b.ticket)}</td><td class="num">${number(b.perfumes)}</td><td class="num">${number(b.boxer)}</td><td class="num">${number(b.pxt)}</td><td class="num"><strong>${number(p.total)}</strong></td></tr>`;
   }).join('');
-  const head=`<thead><tr><th>#</th><th>Local</th><th>Principal</th><th>Sprint Ticket</th><th>Sprint Perfumes</th><th>Sprint Boxer</th><th>Sprint PxT</th><th>Total</th></tr></thead>`;
+  const head=`<thead><tr><th class="align-right">#</th><th>Local</th><th class="align-right">Principal</th><th class="align-right">Sprint Ticket</th><th class="align-right">Sprint Perfumes</th><th class="align-right">Sprint Boxer</th><th class="align-right">Sprint PxT</th><th class="align-right">Total</th></tr></thead>`;
   $('storeRankTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="8" class="empty-state">Sin puntos para este filtro</td></tr></tbody>`;
   $('storeRankRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} locales`:'';
 }
@@ -698,7 +732,7 @@ function renderRankStoreCategory(storeCategory){
     const badge=i<pointsTable.length?`+${pointsTable[i]} pts`:'—';
     return `<tr><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name">${escapeHtml(p.local)}</td><td class="num">${cfg.fmt(p.real)}</td><td class="num">${cfg.fmt(p.obj)}</td><td class="num">${percent(p.ratio)}</td><td class="num">${badge}</td></tr>`;
   }).join('');
-  const head=`<thead><tr><th>#</th><th>Local</th><th>${cfg.label}</th><th>Objetivo</th><th>% cumplimiento</th><th>Puntos</th></tr></thead>`;
+  const head=`<thead><tr><th class="align-right">#</th><th>Local</th><th class="align-right">${cfg.label}</th><th class="align-right">Objetivo</th><th class="align-right">% cumplimiento</th><th class="align-right">Puntos</th></tr></thead>`;
   $('storeRankTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="6" class="empty-state">Sin locales para este filtro</td></tr></tbody>`;
   $('storeRankRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} locales`:'';
 }
@@ -956,7 +990,7 @@ function renderEvolutionWeeks(weeks,heading){
     // el resto del dashboard; antes se mostraba crudo (bug real, auditoría 2026-09-06).
     return `<tr><td class="seller-name">Semana ${semana} de ${mes}</td><td class="num">${w.ratio!==null?percent(w.ratio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${mejora!==null?`<span class="${mejora>=0?'positive':'negative'}">${mejora>=0?'+':''}${mejora.toFixed(1)} pts</span>`:'—'}</td><td class="num">${w.tp?money(w.tp):'—'}</td><td class="num">${w.conv?percent(w.conv*100):'—'}</td><td class="num">${w.pxt?number(w.pxt):'—'}</td></tr>`;
   }).join('');
-  $('evolutionTable').innerHTML=`<thead><tr><th>Semana</th><th>% cumplimiento</th><th>Mejora</th><th>Ticket prom.</th><th>Conversión</th><th>PxT</th></tr></thead><tbody>${rows}</tbody>`;
+  $('evolutionTable').innerHTML=`<thead><tr><th>Semana</th><th class="align-right">% cumplimiento</th><th class="align-right">Mejora</th><th class="align-right">Ticket prom.</th><th class="align-right">Conversión</th><th class="align-right">PxT</th></tr></thead><tbody>${rows}</tbody>`;
 
   // fmt de conv multiplica por 100 — mismo motivo que metricMeta más arriba (auditoría 2026-09-06).
   const badgeMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:number}};
@@ -1020,8 +1054,8 @@ function renderRankMejora(){
   }).join('');
 
   $('rankingTable').innerHTML=list.length?
-    `<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>% semana actual</th><th>% semana anterior</th><th>Mejora</th><th>Tendencia</th></tr></thead><tbody>${body}</tbody>`
-    :`<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>% semana actual</th><th>% semana anterior</th><th>Mejora</th><th>Tendencia</th></tr></thead><tbody><tr><td colspan="7" class="empty-state">Sin datos para estos filtros</td></tr></tbody>`;
+    `<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">% semana actual</th><th class="align-right">% semana anterior</th><th class="align-right">Mejora</th><th class="align-right">Tendencia</th></tr></thead><tbody>${body}</tbody>`
+    :`<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">% semana actual</th><th class="align-right">% semana anterior</th><th class="align-right">Mejora</th><th class="align-right">Tendencia</th></tr></thead><tbody><tr><td colspan="7" class="empty-state">Sin datos para estos filtros</td></tr></tbody>`;
   $('rankingRowsCount').textContent=list.length?`${list.length} vendedores`:'';
 }
 function renderRankCategory(category){
@@ -1067,10 +1101,10 @@ function renderRankCategory(category){
 
   const body=list.map((p,i)=>`<tr><td class="num">${rankPos(i)}</td><td class="seller-name">${escapeHtml(p.name)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${cfg.fmt(p.real)}</td><td class="num">${p.obj?cfg.fmt(p.obj):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.ratio!==null?percent(p.ratio):'—'}</td>${gpPoints?`<td class="num">${gpCol(p)}</td>`:''}</tr>`).join('');
 
-  const gpHeadCell=gpPoints?'<th>Puntos GP</th>':'';
+  const gpHeadCell=gpPoints?'<th class="align-right">Puntos GP</th>':'';
   $('rankingTable').innerHTML=list.length?
-    `<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>${cfg.valueLabel}</th><th>Objetivo</th><th>% cumplimiento</th>${gpHeadCell}</tr></thead><tbody>${body}</tbody>`
-    :`<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>${cfg.valueLabel}</th><th>Objetivo</th><th>% cumplimiento</th>${gpHeadCell}</tr></thead><tbody><tr><td colspan="${gpPoints?7:6}" class="empty-state">Sin datos para estos filtros</td></tr></tbody>`;
+    `<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">${cfg.valueLabel}</th><th class="align-right">Objetivo</th><th class="align-right">% cumplimiento</th>${gpHeadCell}</tr></thead><tbody>${body}</tbody>`
+    :`<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">${cfg.valueLabel}</th><th class="align-right">Objetivo</th><th class="align-right">% cumplimiento</th>${gpHeadCell}</tr></thead><tbody><tr><td colspan="${gpPoints?7:6}" class="empty-state">Sin datos para estos filtros</td></tr></tbody>`;
   $('rankingRowsCount').textContent=list.length?`${list.length} vendedores`:'';
 
   // Con un filtro de Local/Vendedor activo, el "#" de esta tabla es la posición DENTRO del
@@ -1120,9 +1154,9 @@ function renderSeason(){
   $('seasonMetrics').innerHTML=metricsCard('Venta total semestre',money(totalActual),`${monthsPresent.length} mes(es) con pestaña cargada`)+metricsCard('Cumplimiento objetivo',percent(globalRatio*100),`${money(totalActual-totalTarget)} vs. objetivo`,statusTone(globalRatio))+metricsCard('Tráfico total',number(totalTraffic),`${percent(avgConv*100)} conversión promedio`)+metricsCard('Ticket promedio',money(avgTicket),'promedio simple de los meses con datos');
 
   const estadoFor=m=>{if(!m.loaded)return{label:'Sin datos',cls:''};if(m.ratio>=1)return{label:'En objetivo',cls:'positive'};if(m.ratio>=.9)return{label:'Alerta',cls:'warning'};return{label:'Atención',cls:'negative'}};
-  $('seasonMonthTable').innerHTML=`<thead><tr><th>Mes</th><th>Objetivo</th><th>Venta real</th><th>Avance</th><th>Acum. real</th><th>Desv. acum.</th><th>Estado</th></tr></thead><tbody>${monthRows.map(m=>{const estado=estadoFor(m);return `<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${money(m.target)}</td><td class="num">${money(m.actual)}</td><td class="num">${percent(m.ratio*100)}</td><td class="num">${money(m.accActual)}</td><td class="num ${m.accDelta>=0?'positive':'negative'}">${money(m.accDelta)}</td><td class="num ${estado.cls}">${estado.label}</td></tr>`}).join('')}<tr class="season-total"><td class="seller-name">Total</td><td class="num">${money(totalTarget)}</td><td class="num">${money(totalActual)}</td><td class="num">${percent(globalRatio*100)}</td><td class="num">${money(totalActual)}</td><td class="num ${totalActual-totalTarget>=0?'positive':'negative'}">${money(totalActual-totalTarget)}</td><td></td></tr></tbody>`;
+  $('seasonMonthTable').innerHTML=`<thead><tr><th>Mes</th><th class="align-right">Objetivo</th><th class="align-right">Venta real</th><th class="align-right">Avance</th><th class="align-right">Acum. real</th><th class="align-right">Desv. acum.</th><th>Estado</th></tr></thead><tbody>${monthRows.map(m=>{const estado=estadoFor(m);return `<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${money(m.target)}</td><td class="num">${money(m.actual)}</td><td class="num">${percent(m.ratio*100)}</td><td class="num">${money(m.accActual)}</td><td class="num ${m.accDelta>=0?'positive':'negative'}">${money(m.accDelta)}</td><td class="${estado.cls}">${estado.label}</td></tr>`}).join('')}<tr class="season-total"><td class="seller-name">Total</td><td class="num">${money(totalTarget)}</td><td class="num">${money(totalActual)}</td><td class="num">${percent(globalRatio*100)}</td><td class="num">${money(totalActual)}</td><td class="num ${totalActual-totalTarget>=0?'positive':'negative'}">${money(totalActual-totalTarget)}</td><td></td></tr></tbody>`;
 
-  $('seasonTrafficTable').innerHTML=`<thead><tr><th>Mes</th><th>Tráfico</th><th>Conversión</th><th>Ticket prom.</th></tr></thead><tbody>${perMonth.map(m=>`<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${number(m.traffic)}</td><td class="num">${percent(m.conv*100)}</td><td class="num">${money(m.ticket)}</td></tr>`).join('')}</tbody>`;
+  $('seasonTrafficTable').innerHTML=`<thead><tr><th>Mes</th><th class="align-right">Tráfico</th><th class="align-right">Conversión</th><th class="align-right">Ticket prom.</th></tr></thead><tbody>${perMonth.map(m=>`<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${number(m.traffic)}</td><td class="num">${percent(m.conv*100)}</td><td class="num">${money(m.ticket)}</td></tr>`).join('')}</tbody>`;
 
   renderSeasonTrend(perMonth);
 
@@ -1134,7 +1168,7 @@ function renderSeason(){
   sellerRows.forEach(row=>{const key=row.Vendedor;if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),actual:0,pxtSum:0,pxtCount:0};groups[key].locales.add(row.Local);groups[key].actual+=num(row,'Venta real');const pxt=num(row,'PxT real');if(pxt){groups[key].pxtSum+=pxt;groups[key].pxtCount++}});
   const rankList=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + '),pxt:g.pxtCount?g.pxtSum/g.pxtCount:0})).sort((a,b)=>b.actual-a.actual);
   const teamTotal=rankList.reduce((sum,g)=>sum+g.actual,0)||1;
-  $('seasonRankingTable').innerHTML=`<thead><tr><th>#</th><th>Vendedor</th><th>Local</th><th>Venta acum.</th><th>Part.</th><th>PxT</th></tr></thead><tbody>${rankList.length?rankList.slice(0,10).map((g,i)=>`<tr><td class="num">${i+1}</td><td class="seller-name">${escapeHtml(g.name)}</td><td class="seller-location">${escapeHtml(g.local)}</td><td class="num">${money(g.actual)}</td><td class="num">${percent(g.actual/teamTotal*100)}</td><td class="num">${number(g.pxt)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-state">Sin datos</td></tr>'}</tbody>`;
+  $('seasonRankingTable').innerHTML=`<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">Venta acum.</th><th class="align-right">Part.</th><th class="align-right">PxT</th></tr></thead><tbody>${rankList.length?rankList.slice(0,10).map((g,i)=>`<tr><td class="num">${i+1}</td><td class="seller-name">${escapeHtml(g.name)}</td><td class="seller-location">${escapeHtml(g.local)}</td><td class="num">${money(g.actual)}</td><td class="num">${percent(g.actual/teamTotal*100)}</td><td class="num">${number(g.pxt)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty-state">Sin datos</td></tr>'}</tbody>`;
 
   const best=withData.length?withData.reduce((a,b)=>b.ratio>a.ratio?b:a):null;
   const worst=withData.length?withData.reduce((a,b)=>b.ratio<a.ratio?b:a):null;
@@ -1159,7 +1193,8 @@ function fillPeriodFilters(monthId,weekId){const months=[...new Set(allRows('VEN
 // (asc. la primera vez, desc. la segunda, mismo toggle que ya usan Locales/E-commerce).
 const SELLER_DETAIL_SORT={
   name:p=>p.name,local:p=>p.local,sale:p=>p.sale,target:p=>p.target,traffic:p=>p.traffic,
-  conversionAvg:p=>p.conversionAvg,ticketAvg:p=>p.ticketAvg,garmentsAvg:p=>p.garmentsAvg,ratio:p=>p.ratio
+  conversionAvg:p=>p.conversionAvg,ticketAvg:p=>p.ticketAvg,garmentsAvg:p=>p.garmentsAvg,ratio:p=>p.ratio,
+  weeksRatio:p=>p.weeksTotal?p.weeksMet/p.weeksTotal:-1
 };
 function sortSellerDetail(list){
   const active=state.sort.table==='sellerDetailTable'?SELLER_DETAIL_SORT[state.sort.key]:null;
@@ -1169,6 +1204,27 @@ function sortSellerDetail(list){
     if(typeof av==='string')return av.localeCompare(bv,'es')*state.sort.direction;
     return (av<bv?-1:av>bv?1:0)*state.sort.direction;
   });
+}
+// "Semanas en objetivo": para cada vendedor, cuántas semanas del MES cumplió su objetivo semanal
+// (Venta real ≥ Venta obj) sobre las semanas que YA tienen objetivo cargado — el denominador crece
+// solo a medida que se cargan más semanas del mes, no arranca fijo en "de 4/5" (mismo patrón que
+// "Meses sobre obj." de Informe de Temporada, pedido explícito 2026-09-08). Fundida por vendedor
+// compartido (fusionarVendedoresCompartidos) ANTES de contar semanas — sin fundir, alguien que
+// cubrió 2 locales en la misma semana quedaba con 2 filas separadas esa semana, cada una con una
+// porción de su venta/objetivo, y el conteo de semanas se inflaba de más (bug real: contaba semana
+// doble en vez de una sola vez evaluada contra su objetivo semanal completo).
+function weeklyComplianceByVendedor(month){
+  const local=$('localFilter').value;
+  const rawRows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>String(row.Mes??'')===month&&(local==='all'||String(row.Local??'')===local));
+  const groups={};
+  fusionarVendedoresCompartidos(rawRows).forEach(row=>{
+    const key=row.Vendedor,obj=num(row,'Venta obj');
+    if(!obj)return; // semana sin objetivo cargado no cuenta ni a favor ni en contra
+    if(!groups[key])groups[key]={met:0,total:0};
+    groups[key].total++;
+    if(num(row,'Venta real')>=obj)groups[key].met++;
+  });
+  return groups;
 }
 function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba partido en dos
@@ -1183,6 +1239,12 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     group.locales.add(row.Local);
     group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=convRate(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++;
   });
+  const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;
+  // "Semanas en objetivo" ignora el filtro de Semana a propósito (mismo criterio que "Cierre
+  // Estimado" de Resumen General, que tampoco se achica con el filtro de fecha): la pregunta es
+  // "cómo viene en el mes", no "cómo vino esa semana puntual" — si Mes==='all' toma el mes vigente.
+  const complianceMonth=metricsMonth==='all'?currentMonthOf('VENDEDOR_SEMANAL'):metricsMonth;
+  const compliance=weeklyComplianceByVendedor(complianceMonth);
   // Campos derivados calculados una sola vez acá (no en cada celda ni en el comparador) para poder
   // ordenar por lo que el usuario realmente VE — el promedio de Conversión/Ticket/Prendas, no el
   // acumulador crudo que suman más arriba (sumar esos acumuladores entre vendedores con distinta
@@ -1191,10 +1253,11 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     const local=[...g.locales].sort().join(' + ');
     const conversionAvg=g.count?g.conversion/g.count:0,ticketAvg=g.count?g.ticket/g.count:0,garmentsAvg=g.count?g.garments/g.count:0;
     const ratio=g.target?g.sale/g.target:0;
-    return{...g,local,conversionAvg,ticketAvg,garmentsAvg,ratio};
+    const comp=compliance[g.name]||{met:0,total:0};
+    return{...g,local,conversionAvg,ticketAvg,garmentsAvg,ratio,weeksMet:comp.met,weeksTotal:comp.total};
   });
   sortSellerDetail(list);
-  const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;const daily=(state.tables.VENDEDOR_DIARIO||[]).filter(row=>rowMatchesFilters(row)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
+  const daily=(state.tables.VENDEDOR_DIARIO||[]).filter(row=>rowMatchesFilters(row)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
   // VENDEDOR_DIARIO no trae una columna de objetivo diario propia (buscaba 'Objetivo del día', que
   // no existe en ninguna alias — daba siempre 0 y la card "Venta" de acá abajo nunca mostraba el %,
   // bug real de la auditoría 2026-09-05). El objetivo diario de CADA vendedor se deriva igual que en
@@ -1228,19 +1291,21 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   // de más arriba) — hay que *100 para mostrarlo como el resto del dashboard; antes se mostraba
   // crudo, mismo bug que dejaba "Conversión media" en 354% en la tarjeta de arriba (auditoría
   // 2026-09-06).
-  const headerCell=(label,key)=>{const active=state.sort.table==='sellerDetailTable'&&state.sort.key===key;return `<th data-sort="${key}">${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`};
-  const body=list.map(row=>`<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${number(row.garmentsAvg)}</td><td class="num ${row.ratio>=1?'positive':row.ratio<.9?'negative':'warning'}">${percent(row.ratio*100)}</td></tr>`).join('');
-  $('sellerDetailTable').innerHTML=`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Venta','sale')}${headerCell('Objetivo','target')}${headerCell('Tráfico','traffic')}${headerCell('Conversión','conversionAvg')}${headerCell('Ticket promedio','ticketAvg')}${headerCell('Prendas por ticket','garmentsAvg')}${headerCell('% objetivo','ratio')}</tr></thead><tbody>${body||'<tr><td colspan="9" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;
+  const headerCell=(label,key,numeric)=>{
+    const active=state.sort.table==='sellerDetailTable'&&state.sort.key===key;
+    const sortAttr=active?(state.sort.direction>0?'ascending':'descending'):'none';
+    return `<th data-sort="${key}" tabindex="0" aria-sort="${sortAttr}"${numeric?' class="align-right"':''}>${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`;
+  };
+  const body=list.map(row=>{
+    const weeksRatio=row.weeksTotal?row.weeksMet/row.weeksTotal:null;
+    const weeksCell=weeksRatio!==null
+      ?`<td class="num ${weeksRatio>=1?'positive':weeksRatio<.9?'negative':'warning'}">${row.weeksMet} de ${row.weeksTotal}</td>`
+      :'<td class="num"><span class="missing-value">Sin datos</span></td>';
+    return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${number(row.garmentsAvg)}</td><td class="num ${row.ratio>=1?'positive':row.ratio<.9?'negative':'warning'}">${percent(row.ratio*100)}</td>${weeksCell}</tr>`;
+  }).join('');
+  $('sellerDetailTable').innerHTML=`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Venta','sale',true)}${headerCell('Objetivo','target',true)}${headerCell('Tráfico','traffic',true)}${headerCell('Conversión','conversionAvg',true)}${headerCell('Ticket promedio','ticketAvg',true)}${headerCell('Prendas por ticket','garmentsAvg',true)}${headerCell('% objetivo','ratio',true)}${headerCell('Semanas en objetivo','weeksRatio',true)}</tr></thead><tbody>${body||'<tr><td colspan="10" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;
   $('sellerDetailRowsCount').textContent=`${list.length} vendedores`;
-  // Mismo patrón de click que renderTable(): un click ordena por esa columna (guardando qué tabla
-  // fue, para no pisar el sort de otra tabla que comparta nombre de columna) y dispara un
-  // re-render completo — el próximo renderSellerMetrics() ya sale ordenado con sortSellerDetail().
-  qa('#sellerDetailTable th[data-sort]').forEach(th=>th.addEventListener('click',()=>{
-    const key=th.dataset.sort;
-    const same=state.sort.table==='sellerDetailTable'&&state.sort.key===key;
-    state.sort={key,direction:same?-state.sort.direction:1,table:'sellerDetailTable'};
-    render();
-  }));
+  attachSortHeaders('sellerDetailTable');
 }
 function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessoryMonthFilter','accessoryWeekFilter'),groups={};
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba con su venta de
@@ -2100,7 +2165,7 @@ function renderEcommerce(){
     ['Venta / día',diasTranscurridos?a.actual/diasTranscurridos:0,diasEnMes?a.target/diasEnMes:0,money],
     ['Tráfico restante',Math.max(0,totals.visitasMeta-totals.visitas),totals.visitasMeta,number]
   ];
-  $('ecomMonthTable').innerHTML=`<thead><tr><th>Métrica</th><th>Total</th><th>Objetivo</th></tr></thead><tbody>${monthRows.map(([label,tot,obj,fmt])=>`<tr><td class="seller-name">${label}</td><td class="num">${fmt(tot)}</td><td class="num">${fmt(obj)}</td></tr>`).join('')}</tbody>`;
+  $('ecomMonthTable').innerHTML=`<thead><tr><th>Métrica</th><th class="align-right">Total</th><th class="align-right">Objetivo</th></tr></thead><tbody>${monthRows.map(([label,tot,obj,fmt])=>`<tr><td class="seller-name">${label}</td><td class="num">${fmt(tot)}</td><td class="num">${fmt(obj)}</td></tr>`).join('')}</tbody>`;
 
   const projection=$('ecomProjection');
   // Proyección Ponderada replica la fórmula real de la planilla de E-commerce (SUMPRODUCTO de la
@@ -2135,6 +2200,24 @@ function renderEcommerce(){
 // state.sort guarda también `table` para que ordenar storeTable por "Conversión" no reordene en
 // silencio a ecomTable la próxima vez que se renderice (comparten nombre de columna).
 function tableSortValue(row,key){return ['Fecha','Día','Local'].includes(key)?String(row[key]??''):parseNumber(row[key])}
+// Engancha click Y teclado (Enter/Espacio) a los headers ordenables de una tabla — antes un
+// th[data-sort] solo respondía al mouse: un <th> no es focuseable ni "activable" con teclado por
+// default, así que alguien navegando sin mouse no podía cambiar el orden de ninguna tabla del
+// dashboard (auditoría 2026-09-06). tabindex="0"/aria-sort van en el <th> generado por cada
+// llamante (ver renderTable() y headerCell() en renderSellerMetrics) — acá solo se engancha el
+// comportamiento, una sola vez, para las dos tablas que lo usan.
+function attachSortHeaders(tableId){
+  qa(`#${tableId} th[data-sort]`).forEach(th=>{
+    const activate=()=>{
+      const key=th.dataset.sort;
+      const same=state.sort.table===tableId&&state.sort.key===key;
+      state.sort={key,direction:same?-state.sort.direction:1,table:tableId};
+      render();
+    };
+    th.addEventListener('click',activate);
+    th.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();activate()}});
+  });
+}
 function renderTable(id,rows,columns,transform){
   const table=$(id);
   const data=(transform?rows.map(transform):rows).slice();
@@ -2144,7 +2227,13 @@ function renderTable(id,rows,columns,transform){
     const av=tableSortValue(a,state.sort.key),bv=tableSortValue(b,state.sort.key);
     return av<bv?-state.sort.direction:av>bv?state.sort.direction:0;
   });
-  table.innerHTML=`<thead><tr>${columns.map(([label,key])=>`<th data-sort="${key}" data-table="${id}">${label}${sortActive&&state.sort.key===key?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`).join('')}</tr></thead><tbody>${data.slice(0,120).map(row=>`<tr>${columns.map(([label,key])=>{
+  // Columnas realmente numéricas (Objetivo/Venta real/Ticket/Desvío/Conversión/Tráfico/Visitas/Q
+  // ventas) — todo lo demás (Fecha/Local/Día/etc.) es texto. Antes esta función le daba class="num"
+  // a TODO menos "Desvío" por default, así que Fecha/Local/Día salían con el mismo blanco+Space
+  // Grotesk que un número — y de paso, al alinear los números a la derecha (pedido 2026-09-08), esas
+  // columnas de texto se hubieran ido a la derecha también si no se corregía este default acá.
+  const isNumericLabel=label=>['Objetivo','Venta real','Ticket','Desvío','Conversión','Tráfico','Visitas','Q ventas'].includes(label);
+  table.innerHTML=`<thead><tr>${columns.map(([label,key])=>{const active=sortActive&&state.sort.key===key;return `<th data-sort="${key}" data-table="${id}" tabindex="0" aria-sort="${active?(state.sort.direction>0?'ascending':'descending'):'none'}"${isNumericLabel(label)?' class="align-right"':''}>${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`}).join('')}</tr></thead><tbody>${data.slice(0,120).map(row=>`<tr>${columns.map(([label,key])=>{
     const value=row[key];
     const isMoney=['Objetivo','Venta real','Ticket','Desvío'].includes(label);
     const isPct=['Conversión'].includes(label);
@@ -2152,15 +2241,13 @@ function renderTable(id,rows,columns,transform){
     // separador de miles (ej. "1842") a diferencia de todo el resto del dashboard (bug real,
     // auditoría 2026-09-05).
     const isCount=['Tráfico','Visitas','Q ventas'].includes(label);
-    const cls=label==='Desvío'?(value>=0?'positive':'negative'):'num';
+    // "num" va SIEMPRE junto al tono en Desvío (no uno u otro) — mismo patrón que ya usan
+    // seasonMonthTable/renderStoreProjectionChart para sus propias columnas de desvío; sin las dos
+    // clases juntas, Desvío se quedaba sin el blanco+alineación a la derecha del resto de números.
+    const cls=label==='Desvío'?`num ${value>=0?'positive':'negative'}`:isNumericLabel(label)?'num':'';
     return `<td class="${cls}">${isMoney?money(value):isPct?percent(value*100):isCount?number(value):escapeHtml(value??'—')}</td>`;
   }).join('')}</tr>`).join('')||`<tr><td colspan="${columns.length}" class="empty-state">Sin datos para estos filtros</td></tr>`}</tbody>`;
-  qa(`#${id} th[data-sort]`).forEach(th=>th.addEventListener('click',()=>{
-    const key=th.dataset.sort;
-    const same=state.sort.table===id&&state.sort.key===key;
-    state.sort={key,direction:same?-state.sort.direction:1,table:id};
-    render();
-  }));
+  attachSortHeaders(id);
 }
 // 04 y 05 consolidan por SEMANA (Mes/Semana), no por rango de fechas suelto — Desde/Hasta se
 // ocultan ahí para no dar a entender que se puede recortar una semana a la mitad, cosa que el
@@ -2401,8 +2488,11 @@ function renderRentabilidad(){
     metricsCard('Rentabilidad Total',money(totals.rentabilidad),'',toneTotal)+
     metricsCard('% Sobre la Venta',percent(pctTotal),'',toneTotal);
   $('rentabilidadRowsCount').textContent=`${list.length} local${list.length===1?'':'es'}`;
-  const rowsHtml=list.map(r=>{const tone=r.pct>=0?'positive':'negative';return`<tr><td>${escapeHtml(r.nombre)}</td><td>${money(r.venta)}</td><td>${money(r.gastos)}</td><td>${money(r.alquiler)}</td><td>${money(r.empleados)}</td><td>${money(r.tarjeta)}</td><td>${money(r.otros)}</td><td>${money(r.cmv)}</td><td class="${tone}">${money(r.rentabilidad)}</td><td class="${tone}">${percent(r.pct)}</td></tr>`}).join('');
-  $('rentabilidadTable').innerHTML=`<thead><tr><th>Local</th><th>Venta Total</th><th>Gastos Total</th><th>Alquiler</th><th>Empleados</th><th>Tarjeta</th><th>Otros</th><th>CMV</th><th>Rentabilidad</th><th>% s/ Venta</th></tr></thead><tbody>${rowsHtml}</tbody>`;
+  // class="num" en las 7 columnas $ que antes quedaban sin clase (texto gris chico en vez de blanco
+  // bold como el resto de la app) — de paso les da la alineación a la derecha de acá abajo, mismo
+  // criterio que el resto de las tablas.
+  const rowsHtml=list.map(r=>{const tone=r.pct>=0?'positive':'negative';return`<tr><td>${escapeHtml(r.nombre)}</td><td class="num">${money(r.venta)}</td><td class="num">${money(r.gastos)}</td><td class="num">${money(r.alquiler)}</td><td class="num">${money(r.empleados)}</td><td class="num">${money(r.tarjeta)}</td><td class="num">${money(r.otros)}</td><td class="num">${money(r.cmv)}</td><td class="num ${tone}">${money(r.rentabilidad)}</td><td class="num ${tone}">${percent(r.pct)}</td></tr>`}).join('');
+  $('rentabilidadTable').innerHTML=`<thead><tr><th>Local</th><th class="align-right">Venta Total</th><th class="align-right">Gastos Total</th><th class="align-right">Alquiler</th><th class="align-right">Empleados</th><th class="align-right">Tarjeta</th><th class="align-right">Otros</th><th class="align-right">CMV</th><th class="align-right">Rentabilidad</th><th class="align-right">% s/ Venta</th></tr></thead><tbody>${rowsHtml}</tbody>`;
 }
 
 function scheduleRefresh(){clearInterval(state.timer);state.timer=null}

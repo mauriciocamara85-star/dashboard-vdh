@@ -80,6 +80,8 @@ html[data-theme="light"] .table-wrap th{background:#1D3A5F;color:#FFFFFF}
 html[data-theme="light"] .table-wrap td{color:#1E3552;border-color:#D5E0EC}
 html[data-theme="light"] .table-wrap tbody tr:nth-child(even){background:#F0F4FA}
 html[data-theme="light"] .table-wrap tbody tr:nth-child(odd){background:#FFFFFF}
+html[data-theme="light"] .table-wrap tbody tr:nth-child(even) td:first-child{background:#F0F4FA}
+html[data-theme="light"] .table-wrap tbody tr:nth-child(odd) td:first-child{background:#FFFFFF}
 html[data-theme="light"] .table-wrap tbody tr:hover td{background:#E0EBF5!important;color:#0F1F33!important}
 html[data-theme="light"] .num{color:#0F1F33!important}
 html[data-theme="light"] .positive{color:#059669!important}
@@ -128,6 +130,7 @@ html[data-theme="light"] .bar-label{color:#7A8FA3}
 .theme-toggle{display:flex;gap:3px;background:var(--ink);border:1px solid var(--line);border-radius:var(--radius-pill);padding:3px;width:fit-content}
 .theme-btn{width:28px;height:28px;border:0;border-radius:var(--radius-pill);background:transparent;color:var(--muted);font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center;transition:.2s}
 .theme-btn:hover{color:var(--white)}
+.theme-btn:active{transform:scale(.9)}
 .theme-btn[aria-pressed="true"]{background:var(--coral);color:#1b120b;box-shadow:0 6px 14px -6px rgba(249,115,22,.55)}
 
 /* ── ÍCONOS SVG (reemplazan emoji en toda la interfaz de supervisión) ── */
@@ -208,7 +211,9 @@ html[data-theme="light"] .brand-logo .logo-dark{display:block}
 .nav{display:grid;gap:5px}
 .nav-item{border:0;background:transparent;color:var(--muted);text-align:left;padding:12px 13px;display:flex;gap:12px;align-items:flex-start;font:500 13px var(--sans);cursor:pointer;border-radius:var(--radius-sm);transition:.2s}
 .nav-item:hover{color:var(--white);background:#172438}
+.nav-item:active{background:var(--ink)}
 .nav-item.active{color:#1b120b;background:var(--coral);box-shadow:0 10px 22px -10px rgba(249,115,22,.55)}
+.nav-item.active:active{background:#e2670f}
 .nav-index{font:600 11px var(--display);color:#64748B;margin-top:2px}
 .nav-item.active .nav-index{color:#1b120b}
 .sidebar-footer{margin-top:auto;border-top:1px solid var(--line);padding:18px 10px 0;display:flex;flex-direction:column;gap:14px}
@@ -218,7 +223,7 @@ html[data-theme="light"] .brand-logo .logo-dark{display:block}
 
 /* ── LAYOUT ───────────────────────────────────────────────── */
 .version{color:var(--coral)}
-.main-content{width:min(100%,1500px);padding:0 38px 34px;overflow:hidden}
+.main-content{width:min(100%,1500px);padding:0 38px 34px;overflow:hidden;position:relative}
 .topbar{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
 .eyebrow,.section-kicker{color:var(--muted);font-size:10px;letter-spacing:1.5px;font-weight:700}
 .section-kicker::before{content:"// "}
@@ -226,8 +231,39 @@ html[data-theme="light"] .brand-logo .logo-dark{display:block}
 .slash{color:var(--coral);padding:0 5px}
 .top-actions{display:flex;align-items:center;gap:14px}
 .data-status{color:var(--muted);font-size:12px}
+/* Confirmación puntual de "se actualizó", al lado del botón que el usuario acaba de tocar — antes
+   la única señal de éxito era el punto verde de la sidebar, lejos de donde está mirando quien tocó
+   ↻ en el topbar. flashRefreshConfirm() la prende un par de segundos y se apaga sola. */
+.refresh-confirm{color:var(--mint);font:600 11px var(--sans);opacity:0;transition:opacity .25s ease;white-space:nowrap}
+.refresh-confirm.show{opacity:1}
 .icon-button{width:36px;height:36px;border:1px solid var(--line);background:var(--card);color:var(--soft);font-size:18px;cursor:pointer;border-radius:var(--radius-pill);box-shadow:var(--shadow-card);transition:.2s}
 .icon-button:hover{color:var(--coral);border-color:var(--coral)}
+.icon-button:active{transform:scale(.92)}
+.icon-button:disabled{opacity:.5;cursor:not-allowed}
+/* Gira mientras loadData() está en vuelo (prendido/apagado por startRefreshSpin/stopRefreshSpin) —
+   reusa el mismo keyframe "spin" de .app-loading-spinner más abajo. */
+.icon-button.is-spinning{animation:spin .7s linear infinite}
+
+/* ── CARGA INICIAL ────────────────────────────────────────────
+   Tapa el contenido de .main-content (que hasta que llegan los datos son puros "Sin datos" y "—"
+   repetidos 8 vistas) con un estado de carga de verdad, en vez de dejar que la app se vea rota
+   durante el fetch inicial (hasta 20s si el endpoint tarda, ver loadData). Vive DENTRO de
+   .main-content (position:relative de esa clase, arriba) para no tapar la sidebar — el usuario ve
+   la marca/navegación al instante, solo el contenido espera. Se apaga una sola vez, en el finally
+   de loadData() (éxito o error), vía hideAppLoading() — nunca vuelve a mostrarse en refrescos
+   posteriores (esos usan el spin del botón + refresh-confirm de arriba, no esta pantalla completa). */
+.app-loading{position:absolute;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--ink);transition:opacity .35s ease,visibility .35s ease}
+.app-loading.is-loaded{opacity:0;visibility:hidden;pointer-events:none}
+.app-loading-spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--coral);border-radius:50%;animation:spin .8s linear infinite}
+.app-loading p{margin:0;color:var(--muted);font:600 12px var(--sans);letter-spacing:.3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* Respeta "reducir movimiento" del sistema operativo — se agrega acá porque esta tanda de cambios
+   sumó las primeras animaciones de spin/fade reales de la app (antes solo existía "rise", la
+   entrada de vistas). No apaga las animaciones a secas (igual necesitan completar su rol de dar
+   estado), solo las acorta a instantáneas. */
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
 
 /* ── CONNECTION / FILTERS ─────────────────────────────────── */
 .connection-strip{margin:26px 0 17px;padding:12px 14px;background:#111d2e;border:1px solid var(--line);display:flex;align-items:center;gap:14px;border-radius:var(--radius)}
@@ -242,6 +278,7 @@ html[data-theme="light"] .filters input[type="date"]{color-scheme:light}
 .filters input[type="date"]::-webkit-calendar-picker-indicator{cursor:pointer;border-radius:4px;padding:3px;transition:.2s}
 .filters input[type="date"]::-webkit-calendar-picker-indicator:hover{background:var(--coral)}
 .primary-button{height:36px;border:0;border-radius:var(--radius-pill);background:var(--coral);color:#1b120b;padding:0 18px;font:700 12px var(--sans);cursor:pointer}
+.primary-button:active{transform:scale(.96)}
 .primary-button span{font-size:16px;padding-left:7px}
 .refresh-control{color:var(--muted);font-size:11px;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .refresh-control select{width:86px;height:31px}
@@ -262,6 +299,7 @@ html[data-theme="light"] .filters input[type="date"]{color-scheme:light}
 .filters label{display:grid;gap:5px;color:var(--muted);font-size:11px}
 .filters select,.filters input{width:100%}
 .text-button{background:none;border:0;color:var(--coral);font:600 11px var(--sans);cursor:pointer;padding:0}
+.text-button:active{opacity:.6}
 .error-banner{background:#451d27;border:1px solid #9f3446;color:#fecdd3;padding:12px 15px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px}
 /* Aviso de sección en preparación (datos de ejemplo, no reales todavía) — mismo patrón que
    .error-banner pero en tono ámbar en vez de rojo, para no confundirse con un error real. */
@@ -299,6 +337,7 @@ html[data-theme="light"] .filters input[type="date"]{color-scheme:light}
 .period-dropdown{position:absolute;top:calc(100% + 8px);left:0;z-index:40;min-width:210px;width:max-content;max-width:260px;display:flex;flex-direction:column;gap:1px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-pop);padding:8px}
 .period-preset{text-align:left;background:none;border:0;color:var(--soft);font:600 12px var(--sans);padding:9px 10px;border-radius:var(--radius-sm);cursor:pointer;transition:.15s}
 .period-preset:hover{background:var(--ink)}
+.period-preset:active{transform:scale(.97)}
 .period-preset.active{background:var(--coral);color:#1b120b}
 /* "Período actual" agrupa Semana/Mes/Trimestre actual bajo una etiqueta no clickeable, con
    sangría — Hoy/Ayer sueltos arriba y el grupo "a la fecha" abajo, visualmente distinto.
@@ -313,6 +352,7 @@ html[data-theme="light"] .filters input[type="date"]{color-scheme:light}
 .period-calendar-dropdown{width:auto;max-width:none}
 .period-custom-actions{display:flex;justify-content:flex-end;gap:14px;padding:8px 6px 2px;align-items:center}
 .period-apply-btn{height:32px;border:0;border-radius:var(--radius-pill);background:var(--coral);color:#1b120b;padding:0 16px;font:700 12px var(--sans);cursor:pointer;transition:.2s}
+.period-apply-btn:active{transform:scale(.95)}
 .period-apply-btn:disabled{opacity:.4;cursor:not-allowed}
 
 /* Flatpickr (CDN) — tema oscuro corporativo para calzar con el resto del panel, en vez del tema
@@ -538,16 +578,46 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .missing-value{font-size:11px;color:var(--muted);font-weight:600}
 
 /* ── TABLE ────────────────────────────────────────────────── */
-.table-wrap{overflow:auto;margin:0 -22px -22px;border-radius:0 0 var(--radius) var(--radius)}
+/* overflow-x (no overflow:auto a secas): así el único eje que scrollea DENTRO de .table-wrap es el
+   horizontal (tablas anchas en mobile) — el vertical lo sigue haciendo la página entera, que es lo
+   que necesita position:sticky en los th de abajo para pegarse al techo del VIEWPORT en vez de a
+   un contenedor interno sin scroll propio (auditoría 2026-09-06). */
+.table-wrap{overflow-x:auto;overflow-y:visible;margin:0 -22px -22px;border-radius:0 0 var(--radius) var(--radius)}
 .table-wrap table{border-collapse:collapse;width:100%;text-align:left;font-size:12px}
 .table-wrap table.table-wide{min-width:720px}
-.table-wrap th{background:var(--sub);color:#D8E4F2;font-size:10px;letter-spacing:.5px;font-weight:700;text-transform:uppercase;padding:11px 12px;white-space:nowrap}
+.table-wrap th{background:var(--sub);color:#D8E4F2;font-size:10px;letter-spacing:.5px;font-weight:700;text-transform:uppercase;padding:11px 12px;white-space:nowrap;position:sticky;top:0;z-index:2}
 .table-wrap th[data-sort]{cursor:pointer;user-select:none}
 .table-wrap th[data-sort]:hover{color:var(--white)}
+.table-wrap th[data-sort]:active{background:#16283d}
+/* Foco de teclado real en los headers ordenables (antes solo funcionaban con mouse — ver
+   sortSellerDetail/renderTable, ahora enganchan Enter/Espacio además de click). outline propio en
+   vez del default del navegador: con position:sticky + fondo oscuro, el outline azul de sistema
+   quedaba parcialmente tapado por las celdas de al lado al hacer scroll horizontal. */
+.table-wrap th[data-sort]:focus-visible{outline:2px solid var(--coral);outline-offset:-2px}
 .table-wrap td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--soft);white-space:nowrap}
 .table-wrap tbody tr:nth-child(even){background:var(--row2)}
 .table-wrap tbody tr:nth-child(odd){background:var(--row)}
 .table-wrap tbody tr:hover td{background:#20344b;color:var(--white)}
+/* Primera columna (siempre el nombre/fecha/local — la identidad de la fila) fija al scrollear una
+   tabla ancha de costado en mobile: sin esto, al scrollear para ver "% objetivo" se pierde de vista
+   A QUIÉN corresponde esa fila (mismo patrón que Google Sheets/Notion). th:first-child es además el
+   único header con top Y left sticky a la vez (la esquina), por eso necesita más z-index que el
+   resto — si no, el resto de los th (solo top) le pasarían por encima al hacer scroll horizontal.
+   Los td:first-child necesitan un fondo PROPIO (no heredan el de su <tr>): position:sticky los saca
+   del flujo de pintado normal, así que sin esto se veían las columnas de atrás transparentando
+   detrás de la columna fija al scrollear. */
+.table-wrap th:first-child{left:0;z-index:3}
+.table-wrap td:first-child{position:sticky;left:0;z-index:1}
+.table-wrap tbody tr:nth-child(even) td:first-child{background:var(--row2)}
+.table-wrap tbody tr:nth-child(odd) td:first-child{background:var(--row)}
+.table-wrap tbody tr:hover td:first-child{background:#20344b}
+/* Números a la derecha, no centrados ni a la izquierda — convención estándar de cualquier tabla de
+   datos (Excel, Sheets, Notion): así las unidades/decenas/centenas quedan alineadas entre filas y
+   se puede comparar magnitudes de un vistazo, algo que ni centrado ni izquierda permiten (pedido
+   explícito 2026-09-08). .align-right es la versión sin el resto de .num (blanco+Space Grotesk)
+   para headers — un <th> no necesita ese tratamiento de número, solo la alineación. */
+.table-wrap td.num{text-align:right}
+.table-wrap th.align-right{text-align:right}
 .num{font-family:var(--display);color:var(--white)!important}
 .positive{color:var(--mint)!important}
 .negative{color:var(--red)!important}
@@ -559,11 +629,13 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .rank-tabs{display:flex;gap:6px;margin:-4px 0 22px;flex-wrap:wrap}
 .rank-tab{height:34px;padding:0 16px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--card);color:var(--muted);font:600 12px var(--sans);cursor:pointer;transition:.2s}
 .rank-tab:hover{color:var(--white);border-color:var(--coral)}
+.rank-tab:active{transform:scale(.96)}
 .rank-tab.active{background:var(--coral);border-color:var(--coral);color:#1b120b}
 .panel-head-right{display:flex;align-items:center;gap:12px}
 .rank-sort-toggle{display:flex;gap:3px;background:var(--ink);border:1px solid var(--line);border-radius:var(--radius-pill);padding:3px}
 .rank-tab-sm{height:24px;padding:0 10px;border:0;border-radius:var(--radius-pill);background:transparent;color:var(--muted);font:600 10px var(--sans);cursor:pointer;transition:.2s}
 .rank-tab-sm:hover{color:var(--white)}
+.rank-tab-sm:active{transform:scale(.94)}
 .rank-tab-sm.active{background:var(--coral);color:#1b120b}
 .rank-pos{display:inline-flex;align-items:center;gap:4px;font-family:var(--display);font-weight:700}
 .rank-medal{font-size:15px;line-height:1}
@@ -700,6 +772,17 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
   .bottom-nav{display:grid}
   body{padding-bottom:76px}
   .main-content{padding:0 14px 25px}.topbar{height:58px}
+  /* Objetivos táctiles más cerca del mínimo recomendado (44pt Apple / 48dp Material) — en desktop
+     se quedan chicos y densos a propósito (34/28/36px), pero acá son controles que se tocan con el
+     dedo: el toggle de tema vive en el drawer mobile, .icon-button es el refresh del topbar, y
+     .rank-tab es la navegación principal de Locales/Vendedores/Ranking en el celular (auditoría
+     2026-09-06). .icon-button llega a 44 exacto porque está solo en el topbar, con lugar de sobra;
+     theme-btn/rank-tab suben a 40 (no a 44) para no inflar filas que ya conviven con otros
+     elementos en el mismo ancho de pantalla. */
+  .icon-button{width:44px;height:44px}
+  .theme-btn{width:40px;height:40px}
+  .rank-tab{height:40px;padding:0 15px}
+  .rank-tab-sm{height:30px;padding:0 12px}
   .connection-strip{display:grid;grid-template-columns:1fr auto}
   .connection-copy{grid-column:1/-1}.connection-strip input{width:100%}
   .refresh-control{grid-column:1/-1;justify-content:space-between}
@@ -753,6 +836,7 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
   display:flex;flex-direction:column;gap:5px;box-shadow:var(--shadow-card);
 }
 .store-kpi-card:hover{border-color:#3a4d66}
+.store-kpi-card:active{transform:scale(.98)}
 .store-kpi-card.active{
   border-color:var(--coral);background:linear-gradient(180deg,rgba(249,115,22,.14),var(--card) 65%);
   box-shadow:0 0 15px rgba(255,107,0,.25);

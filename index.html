@@ -48,9 +48,13 @@
     </aside>
 
     <main class="main-content">
+      <div class="app-loading" id="appLoading" role="status" aria-live="polite">
+        <div class="app-loading-spinner" aria-hidden="true"></div>
+        <p>Cargando datos del negocio…</p>
+      </div>
       <header class="topbar">
         <div class="eyebrow">MONITOR DE PERFORMANCE <span class="slash">/</span> <span id="lastRefresh">sin datos</span></div>
-        <div class="top-actions"><span class="data-status" id="dataStatus">Esperando conexión</span><button class="icon-button" id="refreshButton" title="Actualizar datos" aria-label="Actualizar datos">↻</button></div>
+        <div class="top-actions"><span class="data-status" id="dataStatus" aria-live="polite">Esperando conexión</span><span class="refresh-confirm" id="refreshConfirm" aria-live="polite"></span><button class="icon-button" id="refreshButton" title="Actualizar datos" aria-label="Actualizar datos">↻</button></div>
       </header>
 
       <section class="filters" aria-label="Filtros globales">
@@ -96,7 +100,7 @@
         <div id="periodRangeBadge" class="period-range-badge" hidden></div>
       </section>
 
-      <div id="errorBanner" class="error-banner" hidden></div>
+      <div id="errorBanner" class="error-banner" role="alert" hidden></div>
 
       <section id="overviewView" class="view active-view">
         <div class="view-heading"><div><span class="section-kicker">01 / PULSO GENERAL</span><span class="live-updated" id="overviewUpdated"></span><h1 id="overviewGreeting">El negocio, de un vistazo.</h1><p>Locales y canal online en una misma lectura. Los objetivos se miden contra lo esperado a la fecha.</p></div><div class="period-badge" id="periodBadge">Sin período</div></div>
