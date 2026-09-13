@@ -594,9 +594,14 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
    reportado 2026-09-13: "cada vez que selecciono una métrica se vuelve azul o oscuro y no se logra
    ver bien"). Qué columna está ordenada ya no depende de esto — se marca aparte, abajo, con
    [aria-sort] (ese sí refleja el estado real de state.sort, no un pseudo-clase que puede quedar
-   pegado). */
+   pegado). color acá es #FFFFFF fijo, NUNCA var(--white): el fondo de este header queda siempre
+   oscuro en los dos temas (ver línea de arriba y el override de modo claro más arriba en este
+   archivo), pero var(--white) SÍ cambia de significado entre temas — en modo claro vale #0F1F33
+   (texto oscuro para fondos claros). Con var(--white) acá, pasar el mouse en modo claro pintaba el
+   header en texto casi negro sobre su propio fondo casi negro — ilegible (bug real reportado
+   2026-09-13: "cuando paso el cursor se oscurecen las letras"). */
 @media (hover:hover){
-  .table-wrap th[data-sort]:hover{color:var(--white)}
+  .table-wrap th[data-sort]:hover{color:#FFFFFF}
   .table-wrap th[data-sort]:active{background:#16283d}
 }
 /* Columna realmente ordenada (headerCell/renderTable ya escriben aria-sort acorde a state.sort) —
