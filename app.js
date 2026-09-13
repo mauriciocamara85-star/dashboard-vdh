@@ -74,6 +74,14 @@ const num=(row,key)=>parseNumber(fieldValue(row,key));
 // vendedores y el embudo mostraba más Ventas que Tráfico — imposible (bug real, auditoría 2026-09-06).
 const convRate=(row,key)=>{const v=num(row,key);return v>1?v/100:v};
 function normalizeDate(value){if(value instanceof Date&&!Number.isNaN(value.getTime()))return value.toISOString().slice(0,10);const text=String(value??'').trim();if(!text)return '';const iso=text.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return iso.slice(1).join('-');const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);if(dmy)return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;const parsed=new Date(text);return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10)}
+// El dashboard entero muestra fechas en formato argentino día/mes/año — normalizeDate de arriba
+// sigue devolviendo/comparando en ISO (año-mes-día, lo que necesita para ordenar como string), pero
+// eso nunca va directo a pantalla: todo texto visible pasa por acá. Pedido explícito 2026-09-13
+// (antes varios gráficos mostraban el ISO crudo tipo "2026-09-10", o su mitad "09-10" recortada con
+// slice(5) — que además queda MES-día, invertido respecto al orden día/mes que pidió el usuario).
+function formatDateAR(dateStr){if(!dateStr)return '';const[y,m,d]=dateStr.split('-');return `${d}/${m}/${y}`}
+// Versión corta (sin año) para ejes de gráfico angostos, mismo orden día/mes que formatDateAR.
+function formatDateShortAR(dateStr){if(!dateStr)return '';const[,m,d]=dateStr.split('-');return `${d}/${m}`}
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 function normalizeLocalName(value){const text=String(value??'').trim();return text?text.toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()):text}
 function normalizeLocalNames(tables){Object.keys(tables).forEach(name=>{(tables[name]||[]).forEach(row=>{if(row&&typeof row==='object'&&'Local'in row)row.Local=normalizeLocalName(row.Local)})})}
@@ -1528,7 +1536,7 @@ function renderBars(rows,monthCtx){
     const diasRestantesMes=Math.max(0,diasEnMes-diasTranscurridos);
     return`<div class="month-progress"><div class="month-progress-head"><span class="section-kicker">AVANCE DEL MES</span><span class="month-progress-stat">${diasTranscurridos} / ${diasEnMes} días · ${pct}%</span></div><div class="month-progress-track"><div class="month-progress-fill" style="width:${pct}%"></div></div><div class="month-progress-foot"><span>Quedan ${diasRestantesMes} día${diasRestantesMes===1?'':'s'}</span><span>${avgDailyReal!==null?money(avgDailyReal):'—'}/día real · ${avgDailyProy!==null?money(avgDailyProy):'—'}/día proy.</span></div></div>`;
   })():'';
-  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="areaGlowMain" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B00" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF6B00" stop-opacity="0"></stop></linearGradient></defs>${bandPath?`<path class="line-band" d="${bandPath}"></path>`:''}<path class="line-area" d="${area}" style="fill:url(#areaGlowMain)"></path>${priorPath?`<path class="line-prior" d="${priorPath}"></path>`:''}<path class="line-target" d="${path('cumTarget')}"></path>${projectionPath?`<path class="line-projection" d="${projectionPath}"></path>`:''}<path class="line-actual" d="${path('cumActual')}"></path>${nodesFor('cumTarget','line-node-target')}${nodesFor('cumActual','line-node-actual')}<circle class="line-dot" cx="${x(last.date).toFixed(1)}" cy="${y(last.cumActual).toFixed(1)}" r="4"><title>${money(last.cumActual)} al ${last.date}</title></circle><line class="hoy-line" x1="${hoyX.toFixed(1)}" y1="0" x2="${hoyX.toFixed(1)}" y2="${h}"></line><text class="hoy-label" x="${hoyLabelX.toFixed(1)}" y="10" text-anchor="${hoyAnchor}">HOY</text><line class="hover-line" x1="0" y1="0" x2="0" y2="${h}" style="display:none"></line>${hoverDots}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${domainStart.slice(5)}</span><span>${money(last.cumActual)} vs ${money(last.cumTarget)}</span><span>${domainEnd.slice(5)}</span></div>${legend}${note}${monthProgress}`;
+  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="areaGlowMain" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B00" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF6B00" stop-opacity="0"></stop></linearGradient></defs>${bandPath?`<path class="line-band" d="${bandPath}"></path>`:''}<path class="line-area" d="${area}" style="fill:url(#areaGlowMain)"></path>${priorPath?`<path class="line-prior" d="${priorPath}"></path>`:''}<path class="line-target" d="${path('cumTarget')}"></path>${projectionPath?`<path class="line-projection" d="${projectionPath}"></path>`:''}<path class="line-actual" d="${path('cumActual')}"></path>${nodesFor('cumTarget','line-node-target')}${nodesFor('cumActual','line-node-actual')}<circle class="line-dot" cx="${x(last.date).toFixed(1)}" cy="${y(last.cumActual).toFixed(1)}" r="4"><title>${money(last.cumActual)} al ${formatDateAR(last.date)}</title></circle><line class="hoy-line" x1="${hoyX.toFixed(1)}" y1="0" x2="${hoyX.toFixed(1)}" y2="${h}"></line><text class="hoy-label" x="${hoyLabelX.toFixed(1)}" y="10" text-anchor="${hoyAnchor}">HOY</text><line class="hover-line" x1="0" y1="0" x2="0" y2="${h}" style="display:none"></line>${hoverDots}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(domainStart)}</span><span>${money(last.cumActual)} vs ${money(last.cumTarget)}</span><span>${formatDateShortAR(domainEnd)}</span></div>${legend}${note}${monthProgress}`;
   attachChartHover(container,{w,domainStart,domainSpan,x,y,points,lastDate,last,projection,priorSeries});
 }
 // Tooltip al pasar el mouse (o el dedo) sobre el gráfico: convierte la posición X en una fecha del
@@ -1570,7 +1578,7 @@ function attachChartHover(container,cfg){
     const priorInRange=cfg.priorSeries?.length&&hoverDate<=cfg.priorSeries[cfg.priorSeries.length-1].date;
     place(dotPrior,priorInRange?valueAtStep(cfg.priorSeries,'cumActual',hoverDate):null,'Historial','var(--muted)');
     if(!rows.length)return hide();
-    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${hoverDate}</div>${rows.map(r=>`<div class="chart-tooltip-row"><i style="background:${r.color}"></i><span>${r.label}</span><strong>${money(r.value)}</strong></div>`).join('')}`;
+    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(hoverDate)}</div>${rows.map(r=>`<div class="chart-tooltip-row"><i style="background:${r.color}"></i><span>${r.label}</span><strong>${money(r.value)}</strong></div>`).join('')}`;
     tooltipEl.hidden=false;
     tooltipEl.style.left=`${Math.min(92,Math.max(8,clientX/rect.width*100))}%`;
   };
@@ -1619,14 +1627,14 @@ function renderDailyComparison(daily){
     const actualCls=status==='good'?'daily-bar-good':status==='bad'?'daily-bar-bad':'daily-bar-none';
     const actualTop=y(d.actual),actualH=Math.max(0,baseline-actualTop);
     const targetTop=y(d.target),targetH=Math.max(0,baseline-targetTop);
-    const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${d.date} · Venta real: ${money(d.actual)}</title></path>`:'';
-    const targetPath=d.target>0?`<path class="daily-bar daily-bar-target" data-day="${i}" d="${roundedTopBarPath(xTarget(i),targetTop,barWidth,targetH,4)}"><title>${d.date} · Objetivo: ${money(d.target)}</title></path>`:'';
+    const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${formatDateAR(d.date)} · Venta real: ${money(d.actual)}</title></path>`:'';
+    const targetPath=d.target>0?`<path class="daily-bar daily-bar-target" data-day="${i}" d="${roundedTopBarPath(xTarget(i),targetTop,barWidth,targetH,4)}"><title>${formatDateAR(d.date)} · Objetivo: ${money(d.target)}</title></path>`:'';
     return actualPath+targetPath;
   }).join('');
 
   const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--red)"></i>Día bajo objetivo</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
   const first=daily[0],last=daily[daily.length-1];
-  container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${first.date.slice(5)}</span><span>${daily.length} día${daily.length===1?'':'s'} cargado${daily.length===1?'':'s'}</span><span>${last.date.slice(5)}</span></div>`;
+  container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${daily.length} día${daily.length===1?'':'s'} cargado${daily.length===1?'':'s'}</span><span>${formatDateShortAR(last.date)}</span></div>`;
   attachDailyHover(container,daily,groupCenter);
 }
 // Hover sobre CUALQUIER punto del grupo del día (no solo encima de una barra puntual): resalta las
@@ -1650,8 +1658,8 @@ function attachDailyHover(container,daily,groupCenter){
     let idx=0,best=Infinity;
     daily.forEach((d,i)=>{const dist=Math.abs(groupCenter(i)-svgX);if(dist<best){best=dist;idx=i}});
     setHighlight(idx);
-    const d=daily[idx],delta=d.actual-d.target,realColor=!d.target?'var(--muted)':delta>=0?'var(--mint)':'var(--red)';
-    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${d.date}</div><div class="chart-tooltip-row"><i style="background:${realColor}"></i><span>Venta real</span><strong>${money(d.actual)}</strong></div><div class="chart-tooltip-row"><i style="background:var(--muted)"></i><span>Objetivo del día</span><strong>${d.target?money(d.target):'sin cargar'}</strong></div>${d.target?`<div class="chart-tooltip-row"><i style="background:${delta>=0?'var(--mint)':'var(--red)'}"></i><span>Desvío</span><strong>${delta>=0?'+':''}${money(delta)}</strong></div>`:''}`;
+    const d=daily[idx],delta=d.actual-d.target,deltaPct=d.target?delta/d.target*100:null,realColor=!d.target?'var(--muted)':delta>=0?'var(--mint)':'var(--red)';
+    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(d.date)}</div><div class="chart-tooltip-row"><i style="background:${realColor}"></i><span>Venta real</span><strong>${money(d.actual)}</strong></div><div class="chart-tooltip-row"><i style="background:var(--muted)"></i><span>Objetivo del día</span><strong>${d.target?money(d.target):'sin cargar'}</strong></div>${d.target?`<div class="chart-tooltip-row"><i style="background:${delta>=0?'var(--mint)':'var(--red)'}"></i><span>Desvío</span><strong>${delta>=0?'+':''}${money(delta)} (${deltaPct>=0?'+':''}${percent(deltaPct)})</strong></div>`:''}`;
     tooltipEl.hidden=false;
     tooltipEl.style.left=`${Math.min(92,Math.max(8,clientX/rect.width*100))}%`;
   };
@@ -2003,9 +2011,9 @@ function renderStoreKpiGrid(ctx){
   $('storeKpiSub-venta').textContent=`${percent(ratio*100)} del objetivo a la fecha`;
 
   if(projection){
-    const desvio=projection.ponderada-monthTarget;
+    const desvio=projection.ponderada-monthTarget,desvioPct=monthTarget?desvio/monthTarget*100:null;
     $('storeKpiValue-proyeccion').textContent=money(projection.ponderada);
-    $('storeKpiSub-proyeccion').textContent=`${desvio>=0?'+':''}${money(desvio)} vs. objetivo del mes`;
+    $('storeKpiSub-proyeccion').textContent=`${desvio>=0?'+':''}${money(desvio)}${desvioPct!==null?` (${desvioPct>=0?'+':''}${percent(desvioPct)})`:''} vs. objetivo del mes`;
   }else{
     $('storeKpiValue-proyeccion').textContent='—';
     $('storeKpiSub-proyeccion').textContent='Sin días cargados todavía';
@@ -2059,13 +2067,13 @@ function renderStoreVentaChart(container,daily){
     const actualCls=status==='good'?'daily-bar-good':status==='bad'?'daily-bar-bad':'daily-bar-none';
     const actualTop=y(d.actual),actualH=Math.max(0,baseline-actualTop);
     const targetTop=y(d.target),targetH=Math.max(0,baseline-targetTop);
-    const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${d.date} · Venta real: ${money(d.actual)}</title></path>`:'';
-    const targetPath=d.target>0?`<path class="daily-bar daily-bar-target" data-day="${i}" d="${roundedTopBarPath(xTarget(i),targetTop,barWidth,targetH,4)}"><title>${d.date} · Objetivo: ${money(d.target)}</title></path>`:'';
+    const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${formatDateAR(d.date)} · Venta real: ${money(d.actual)}</title></path>`:'';
+    const targetPath=d.target>0?`<path class="daily-bar daily-bar-target" data-day="${i}" d="${roundedTopBarPath(xTarget(i),targetTop,barWidth,targetH,4)}"><title>${formatDateAR(d.date)} · Objetivo: ${money(d.target)}</title></path>`:'';
     return actualPath+targetPath;
   }).join('');
   const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--red)"></i>Día bajo objetivo</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
   const first=daily[0],last=daily[daily.length-1];
-  container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${first.date.slice(5)}</span><span>${daily.length} día${daily.length===1?'':'s'}</span><span>${last.date.slice(5)}</span></div>`;
+  container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${daily.length} día${daily.length===1?'':'s'}</span><span>${formatDateShortAR(last.date)}</span></div>`;
   attachDailyHover(container,daily,groupCenter);
 }
 // Card 02 — cumulado real + objetivo del mes (línea fija) + proyección punteada hasta fin de mes.
@@ -2095,7 +2103,7 @@ function renderStoreProjectionChart(container,daily,ctx){
   const projPath=`M${x(lastDate).toFixed(1)},${y(last.cum).toFixed(1)} L${x(endDate).toFixed(1)},${y(projection.ponderada).toFixed(1)}`;
   const targetY=y(monthTarget).toFixed(1);
   const targetLabelY=(y(monthTarget)-5).toFixed(1);
-  const desvio=projection.ponderada-monthTarget;
+  const desvio=projection.ponderada-monthTarget,desvioPct=monthTarget?desvio/monthTarget*100:null;
   // Leyenda ABAJO del gráfico, no flotando encima (mismo fix ya aplicado en renderBars): con el
   // objetivo ahora más cerca del borde superior recién liberado, una leyenda position:absolute en esa
   // misma esquina volvía a pisar justo la línea punteada y su etiqueta nueva.
@@ -2104,7 +2112,7 @@ function renderStoreProjectionChart(container,daily,ctx){
   // definida y usada por el gráfico acumulado de Resumen General) en vez de un stroke hardcodeado —
   // de paso corrige que el color fijo anterior no cambiaba en modo claro. dasharray 6 6 pedido puntual
   // para esta tarjeta se aplica encima vía style inline (gana sobre el 4 4 de la clase).
-  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="areaGlowStore" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B00" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF6B00" stop-opacity="0"></stop></linearGradient></defs><path class="line-area" d="${areaPath}" style="fill:url(#areaGlowStore)"></path><line class="line-target" x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" style="stroke-dasharray:6 6"></line><text class="target-label" x="${w-4}" y="${targetLabelY}" text-anchor="end">Meta ${money(monthTarget)}</text><path class="line-actual" d="${linePath}"></path><path class="line-projection" d="${projPath}"></path><circle class="line-dot" cx="${x(lastDate).toFixed(1)}" cy="${y(last.cum).toFixed(1)}" r="4"><title>${money(last.cum)} al ${lastDate}</title></circle></svg><div class="line-axis"><span>${firstDate.slice(5)}</span><span>${desvio>=0?'+':''}${money(desvio)} proyectado vs. objetivo</span><span>${endDate.slice(5)}</span></div>${legend}`;
+  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="areaGlowStore" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B00" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF6B00" stop-opacity="0"></stop></linearGradient></defs><path class="line-area" d="${areaPath}" style="fill:url(#areaGlowStore)"></path><line class="line-target" x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" style="stroke-dasharray:6 6"></line><text class="target-label" x="${w-4}" y="${targetLabelY}" text-anchor="end">Meta ${money(monthTarget)}</text><path class="line-actual" d="${linePath}"></path><path class="line-projection" d="${projPath}"></path><circle class="line-dot" cx="${x(lastDate).toFixed(1)}" cy="${y(last.cum).toFixed(1)}" r="4"><title>${money(last.cum)} al ${formatDateAR(lastDate)}</title></circle></svg><div class="line-axis"><span>${formatDateShortAR(firstDate)}</span><span>${desvio>=0?'+':''}${money(desvio)}${desvioPct!==null?` (${desvioPct>=0?'+':''}${percent(desvioPct)})`:''} proyectado vs. objetivo</span><span>${formatDateShortAR(endDate)}</span></div>${legend}`;
 }
 // Cards 03/04/05 — línea de evolución diaria de una sola métrica, mismas clases .line-* que ya
 // usa el gráfico del Resumen General (nada nuevo que mantener aparte).
@@ -2119,9 +2127,9 @@ function renderStoreLineChart(container,daily,key,fmt,color){
   const linePath=points.map((p,i)=>`${i===0?'M':'L'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ');
   const areaPath=`${linePath} L${x(points.length-1).toFixed(1)},${h} L${x(0).toFixed(1)},${h} Z`;
   const gradId=`areaGlow-${key}`;
-  const dots=points.map((p,i)=>`<circle class="line-dot" cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.5" style="fill:${color}"><title>${p.date}: ${fmt(p[key])}</title></circle>`).join('');
+  const dots=points.map((p,i)=>`<circle class="line-dot" cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.5" style="fill:${color}"><title>${formatDateAR(p.date)}: ${fmt(p[key])}</title></circle>`).join('');
   const first=points[0],last=points[points.length-1];
-  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style="stop-color:${color};stop-opacity:.25"></stop><stop offset="100%" style="stop-color:${color};stop-opacity:0"></stop></linearGradient></defs><path class="line-area" d="${areaPath}" style="fill:url(#${gradId})"></path><path class="line-actual" d="${linePath}" style="stroke:${color}"></path>${dots}</svg><div class="line-axis"><span>${first.date.slice(5)}</span><span>${fmt(last[key])} · último dato</span><span>${last.date.slice(5)}</span></div>`;
+  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style="stop-color:${color};stop-opacity:.25"></stop><stop offset="100%" style="stop-color:${color};stop-opacity:0"></stop></linearGradient></defs><path class="line-area" d="${areaPath}" style="fill:url(#${gradId})"></path><path class="line-actual" d="${linePath}" style="stroke:${color}"></path>${dots}</svg><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${fmt(last[key])} · último dato</span><span>${formatDateShortAR(last.date)}</span></div>`;
 }
 // Card 06 — layout master-detail (dona con el total adentro a la izquierda, tarjetas KPI + barra
 // de distribución ocupando todo el resto a la derecha). Efectivo/Tarjeta/Descuento son valores
@@ -2261,11 +2269,18 @@ function renderTable(id,rows,columns,transform){
     // separador de miles (ej. "1842") a diferencia de todo el resto del dashboard (bug real,
     // auditoría 2026-09-05).
     const isCount=['Tráfico','Visitas','Q ventas'].includes(label);
+    // Fecha siempre en formato argentino día/mes/año (formatDateAR) — el valor crudo que llega del
+    // Sheet ya es ISO (ver normalizeDate), nunca se muestra así directo (pedido 2026-09-13).
+    const isDate=label==='Fecha';
     // "num" va SIEMPRE junto al tono en Desvío (no uno u otro) — mismo patrón que ya usan
     // seasonMonthTable/renderStoreProjectionChart para sus propias columnas de desvío; sin las dos
     // clases juntas, Desvío se quedaba sin el blanco+alineación a la derecha del resto de números.
     const cls=label==='Desvío'?`num ${value>=0?'positive':'negative'}`:isNumericLabel(label)?'num':'';
-    return `<td class="${cls}">${isMoney?money(value):isPct?percent(value*100):isCount?number(value):escapeHtml(value??'—')}</td>`;
+    // Desvío también en % (no solo en $) — mismo pedido de arriba: se calcula contra "Objetivo" de
+    // esta misma fila (el valor crudo sigue en `row`, el transform de storeTable solo AGREGA
+    // __delta, no reemplaza el resto de columnas).
+    const deltaPct=label==='Desvío'&&row['Objetivo']?value/row['Objetivo']*100:null;
+    return `<td class="${cls}">${isMoney?`${money(value)}${deltaPct!==null?` (${deltaPct>=0?'+':''}${percent(deltaPct)})`:''}`:isPct?percent(value*100):isCount?number(value):isDate?formatDateAR(value):escapeHtml(value??'—')}</td>`;
   }).join('')}</tr>`).join('')||`<tr><td colspan="${columns.length}" class="empty-state">Sin datos para estos filtros</td></tr>`}</tbody>`;
   attachSortHeaders(id);
 }
@@ -2327,7 +2342,6 @@ function weekDateRange(month,week){
   }
   return{start:dates[0],end:dates[dates.length-1]};
 }
-function formatDateAR(dateStr){const[y,m,d]=dateStr.split('-');return`${d}/${m}/${y}`}
 function updatePeriodRangeBadge(){
   const badge=$('periodRangeBadge');
   let monthId,weekId;
