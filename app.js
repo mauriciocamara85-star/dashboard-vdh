@@ -1307,6 +1307,28 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   $('sellerDetailRowsCount').textContent=`${list.length} vendedores`;
   attachSortHeaders('sellerDetailTable');
 }
+// Accesorios: mismo mecanismo de header clickeable que sellerDetailTable (SELLER_DETAIL_SORT +
+// attachSortHeaders) — pedido explícito 2026-09-13: el orden por defecto (% cumplimiento
+// combinado perfumes+boxer) sirve para el ranking, pero también hace falta poder ordenar por
+// CANTIDAD vendida de cada producto (quién vendió más perfumes / más boxers en crudo, sin mirar
+// el objetivo). Un click en "Perfumes" o "Boxers" pasa a ordenar por esa cantidad real; sin click
+// (o con otra tabla como último click) cae al criterio combinado de siempre.
+const ACCESSORY_SORT={
+  name:p=>p.name,local:p=>p.local,perfumesActual:p=>p.perfumesActual,boxerActual:p=>p.boxerActual
+};
+function sortAccessories(list){
+  const active=state.sort.table==='accessoryTable'?ACCESSORY_SORT[state.sort.key]:null;
+  list.sort((a,b)=>{
+    if(!active){
+      const ar=(a.perfumesTarget+a.boxerTarget)?(a.perfumesActual+a.boxerActual)/(a.perfumesTarget+a.boxerTarget):0;
+      const br=(b.perfumesTarget+b.boxerTarget)?(b.perfumesActual+b.boxerActual)/(b.perfumesTarget+b.boxerTarget):0;
+      return (br-ar)||String(a.name).localeCompare(String(b.name),'es');
+    }
+    const av=active(a),bv=active(b);
+    if(typeof av==='string')return av.localeCompare(bv,'es')*state.sort.direction;
+    return (av<bv?-1:av>bv?1:0)*state.sort.direction;
+  });
+}
 function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessoryMonthFilter','accessoryWeekFilter'),groups={};
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba con su venta de
   // perfumes/boxers y su objetivo partidos en dos filas, como si fueran dos vendedores distintos
@@ -1317,16 +1339,14 @@ function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessory
     groups[key].locales.add(row.Local);
     groups[key].perfumesTarget+=num(row,'Perfumes obj');groups[key].perfumesActual+=num(row,'Perfumes real');groups[key].boxerTarget+=num(row,'Boxer obj');groups[key].boxerActual+=num(row,'Boxer real');
   });
-  // CRITERIO GENERAL DE ORDENAMIENTO: tampoco tenía sort — orden crudo de planilla. No hay una
-  // columna $ ni un único % acá (son 2 productos en paralelo), así que se ordena por el mismo
-  // % de cumplimiento COMBINADO (perfumes+boxer) que esta función ya usa para su propia card
-  // "Cumplimiento global" más abajo — se reusa la fórmula existente, no se inventa una nueva.
-  const list=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + ')})).filter(row=>row.perfumesTarget||row.perfumesActual||row.boxerTarget||row.boxerActual).sort((a,b)=>{
-    const ar=(a.perfumesTarget+a.boxerTarget)?(a.perfumesActual+a.boxerActual)/(a.perfumesTarget+a.boxerTarget):0;
-    const br=(b.perfumesTarget+b.boxerTarget)?(b.perfumesActual+b.boxerActual)/(b.perfumesTarget+b.boxerTarget):0;
-    return (br-ar)||String(a.name).localeCompare(String(b.name),'es');
-  });
-  const status=(actual,target)=>target?(actual/target>=1?'positive':actual/target<.9?'negative':'warning'):'warning';const cell=(actual,target)=>`<div class="accessory-cell"><strong>${number(actual)}</strong><span>obj. ${number(target)}</span><em class="${status(actual,target)}">${target?percent(actual/target*100):'Sin objetivo'}</em><small>desvío ${number(actual-target)}</small></div>`;const totals=list.reduce((acc,row)=>{acc.perfumesTarget+=row.perfumesTarget;acc.perfumesActual+=row.perfumesActual;acc.boxerTarget+=row.boxerTarget;acc.boxerActual+=row.boxerActual;return acc},{perfumesTarget:0,perfumesActual:0,boxerTarget:0,boxerActual:0});const totalRatio=(totals.perfumesTarget+totals.boxerTarget)?(totals.perfumesActual+totals.boxerActual)/(totals.perfumesTarget+totals.boxerTarget):0;$('accessoryMetrics').innerHTML=metricsCard('Vendedores con datos',number(list.length),'según filtros')+metricsCard('Perfumes',number(totals.perfumesActual),`obj. ${number(totals.perfumesTarget)} · ${totals.perfumesTarget?percent(totals.perfumesActual/totals.perfumesTarget*100):'sin objetivo'}`,status(totals.perfumesActual,totals.perfumesTarget))+metricsCard('Boxers',number(totals.boxerActual),`obj. ${number(totals.boxerTarget)} · ${totals.boxerTarget?percent(totals.boxerActual/totals.boxerTarget*100):'sin objetivo'}`,status(totals.boxerActual,totals.boxerTarget))+metricsCard('Cumplimiento global',percent(totalRatio*100),'perfumes + boxers',status(totals.perfumesActual+totals.boxerActual,totals.perfumesTarget+totals.boxerTarget));$('accessoryTable').innerHTML=list.length?`<thead><tr><th>Vendedor</th><th>Local</th><th>Perfumes</th><th>Boxers</th></tr></thead><tbody>${list.map(row=>`<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td>${cell(row.perfumesActual,row.perfumesTarget)}</td><td>${cell(row.boxerActual,row.boxerTarget)}</td></tr>`).join('')}</tbody>`:'<tbody><tr><td colspan="4" class="empty-state">Sin datos de accesorios para estos filtros.</td></tr></tbody>';$('accessoryRowsCount').textContent=list.length?`${list.length} vendedores`:'Sin datos'}
+  // CRITERIO GENERAL DE ORDENAMIENTO: por defecto ordena por el mismo % de cumplimiento COMBINADO
+  // (perfumes+boxer) que esta función ya usa para su propia card "Cumplimiento global" más abajo —
+  // se reusa la fórmula existente, no se inventa una nueva. Un click en un header pasa a ordenar
+  // por esa columna (ver sortAccessories/ACCESSORY_SORT), incluida la cantidad real vendida de
+  // Perfumes/Boxers.
+  const list=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + ')})).filter(row=>row.perfumesTarget||row.perfumesActual||row.boxerTarget||row.boxerActual);
+  sortAccessories(list);
+  const status=(actual,target)=>target?(actual/target>=1?'positive':actual/target<.9?'negative':'warning'):'warning';const cell=(actual,target)=>`<div class="accessory-cell"><strong>${number(actual)}</strong><span>obj. ${number(target)}</span><em class="${status(actual,target)}">${target?percent(actual/target*100):'Sin objetivo'}</em><small>desvío ${number(actual-target)}</small></div>`;const totals=list.reduce((acc,row)=>{acc.perfumesTarget+=row.perfumesTarget;acc.perfumesActual+=row.perfumesActual;acc.boxerTarget+=row.boxerTarget;acc.boxerActual+=row.boxerActual;return acc},{perfumesTarget:0,perfumesActual:0,boxerTarget:0,boxerActual:0});const totalRatio=(totals.perfumesTarget+totals.boxerTarget)?(totals.perfumesActual+totals.boxerActual)/(totals.perfumesTarget+totals.boxerTarget):0;$('accessoryMetrics').innerHTML=metricsCard('Vendedores con datos',number(list.length),'según filtros')+metricsCard('Perfumes',number(totals.perfumesActual),`obj. ${number(totals.perfumesTarget)} · ${totals.perfumesTarget?percent(totals.perfumesActual/totals.perfumesTarget*100):'sin objetivo'}`,status(totals.perfumesActual,totals.perfumesTarget))+metricsCard('Boxers',number(totals.boxerActual),`obj. ${number(totals.boxerTarget)} · ${totals.boxerTarget?percent(totals.boxerActual/totals.boxerTarget*100):'sin objetivo'}`,status(totals.boxerActual,totals.boxerTarget))+metricsCard('Cumplimiento global',percent(totalRatio*100),'perfumes + boxers',status(totals.perfumesActual+totals.boxerActual,totals.perfumesTarget+totals.boxerTarget));const headerCell=(label,key)=>{const active=state.sort.table==='accessoryTable'&&state.sort.key===key;const sortAttr=active?(state.sort.direction>0?'ascending':'descending'):'none';return `<th data-sort="${key}" tabindex="0" aria-sort="${sortAttr}">${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`};$('accessoryTable').innerHTML=list.length?`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Perfumes','perfumesActual')}${headerCell('Boxers','boxerActual')}</tr></thead><tbody>${list.map(row=>`<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td>${cell(row.perfumesActual,row.perfumesTarget)}</td><td>${cell(row.boxerActual,row.boxerTarget)}</td></tr>`).join('')}</tbody>`:'<tbody><tr><td colspan="4" class="empty-state">Sin datos de accesorios para estos filtros.</td></tr></tbody>';$('accessoryRowsCount').textContent=list.length?`${list.length} vendedores`:'Sin datos';attachSortHeaders('accessoryTable')}
 function renderOverview(){
   const localRows=rowsThroughToday(overviewRows('LOCAL_DIARIO')),ecomRows=rowsThroughToday(overviewRows('ECOM_DIARIO')),rows=[...localRows,...ecomRows];
   const a=aggregate(rows);

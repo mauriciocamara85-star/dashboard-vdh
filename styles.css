@@ -587,8 +587,24 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .table-wrap table.table-wide{min-width:720px}
 .table-wrap th{background:var(--sub);color:#D8E4F2;font-size:10px;letter-spacing:.5px;font-weight:700;text-transform:uppercase;padding:11px 12px;white-space:nowrap;position:sticky;top:0;z-index:2}
 .table-wrap th[data-sort]{cursor:pointer;user-select:none}
-.table-wrap th[data-sort]:hover{color:var(--white)}
-.table-wrap th[data-sort]:active{background:#16283d}
+/* :hover/:active reales solo se enganchan en dispositivos con mouse de verdad (hover:hover). En
+   touch (tablets/celus, donde se usa este dashboard en el piso de venta) esos pseudo-clases no
+   tienen un mouseleave que los saque — el header tocado para ordenar quedaba "pegado" en su estado
+   de hover/active, más oscuro, hasta el próximo tap en cualquier otro lado de la pantalla (bug real
+   reportado 2026-09-13: "cada vez que selecciono una métrica se vuelve azul o oscuro y no se logra
+   ver bien"). Qué columna está ordenada ya no depende de esto — se marca aparte, abajo, con
+   [aria-sort] (ese sí refleja el estado real de state.sort, no un pseudo-clase que puede quedar
+   pegado). */
+@media (hover:hover){
+  .table-wrap th[data-sort]:hover{color:var(--white)}
+  .table-wrap th[data-sort]:active{background:#16283d}
+}
+/* Columna realmente ordenada (headerCell/renderTable ya escriben aria-sort acorde a state.sort) —
+   mismo coral que el resto del dashboard usa para "esto está activo/seleccionado"
+   (.nav-item.active, .rank-tab.active, .store-kpi-card.active): a diferencia de :hover/:active de
+   arriba, esto nunca queda "pegado" porque sale del estado real, no de un pseudo-clase del browser. */
+.table-wrap th[data-sort][aria-sort="ascending"],
+.table-wrap th[data-sort][aria-sort="descending"]{color:var(--coral)}
 /* Foco de teclado real en los headers ordenables (antes solo funcionaban con mouse — ver
    sortSellerDetail/renderTable, ahora enganchan Enter/Espacio además de click). outline propio en
    vez del default del navegador: con position:sticky + fondo oscuro, el outline azul de sistema
