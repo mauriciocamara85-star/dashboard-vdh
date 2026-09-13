@@ -2168,7 +2168,24 @@ function renderEcommerce(){
   // 2026-09-05). `cutoff` ya es la fecha vigente (filtro "Hasta" o el último día cargado).
   const diasEnMes=daysInCalendarMonth(cutoff);
   const diasTranscurridos=loadedDates.length,diasRestantes=Math.max(0,diasEnMes-diasTranscurridos);
-  const ritmoNecesario=diasRestantes?Math.max(0,-delta)/diasRestantes:0;
+  // allMonthRows/perDateMonth/ecomMonthTarget: TODO el mes vigente de ECOM_DIARIO, ignorando el
+  // filtro de fecha de "Período" de arriba — mismo criterio que ya usa Proyección Ponderada más
+  // abajo (auditoría 2026-09-06), adelantado acá para que "Ritmo necesario" salga igual que la
+  // planilla: (Objetivo MENSUAL completo - Venta acumulada) / Días restantes. Antes usaba el desvío
+  // YA acumulado (a.target prorrateado a los días cargados) sobre días restantes, que ignora lo que
+  // todavía falta vender en lo que resta del mes para el objetivo completo — daba $39.723 contra los
+  // $251.879 reales de la planilla (bug real reportado 2026-09-13 con captura de la planilla).
+  const currentMonth=currentMonthOf('ECOM_DIARIO');
+  const allMonthRows=(state.tables.ECOM_DIARIO||[]).filter(row=>!currentMonth||String(row.Mes??'')===currentMonth);
+  const perDateMonth={};
+  allMonthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,target:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].target+=num(row,'Objetivo')});
+  const loadedActual={},loadedTarget={};
+  let ecomMonthTarget=0;
+  Object.keys(perDateMonth).forEach(d=>{
+    ecomMonthTarget+=perDateMonth[d].target;
+    if(perDateMonth[d].actual>0){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}
+  });
+  const ritmoNecesario=diasRestantes?Math.max(0,ecomMonthTarget-a.actual)/diasRestantes:0;
   // "Cumplimiento a la fecha", no "Avance del mes": ratio compara contra a.target, que es el
   // objetivo PRORRATEADO a los días ya cargados/filtrados, no el objetivo del MES completo — el
   // nombre viejo prometía "avance del mes" (como el de las planillas de cada local, venta acumulada
@@ -2199,21 +2216,12 @@ function renderEcommerce(){
   // Proyección Ponderada replica la fórmula real de la planilla de E-commerce (SUMPRODUCTO de la
   // celda C13, verificada contra la planilla real: con los mismos datos dio $3.690.489 contra los
   // $3.690.489 de la planilla — match exacto, auditoría 2026-09-06. Ver projectMonth() y
-  // storeProjection(), mismo criterio ya portado ahí). allMonthRows es TODO el mes vigente de
-  // ECOM_DIARIO, ignorando el filtro de fecha de "Período" arriba — igual que allMonthRows en
+  // storeProjection(), mismo criterio ya portado ahí). loadedActual/loadedTarget/ecomMonthTarget ya
+  // se calcularon arriba (los reusa también "Ritmo necesario") a partir de allMonthRows, TODO el mes
+  // vigente de ECOM_DIARIO ignorando el filtro de fecha de "Período" — igual que allMonthRows en
   // renderStores(): antes esto usaba `daily` (que sí respeta ese filtro) tanto para el objetivo
   // del mes como para el ritmo, así que filtrar por un rango corto encogía el objetivo del mes
   // igual que el bug ya resuelto en Locales.
-  const currentMonth=currentMonthOf('ECOM_DIARIO');
-  const allMonthRows=(state.tables.ECOM_DIARIO||[]).filter(row=>!currentMonth||String(row.Mes??'')===currentMonth);
-  const perDateMonth={};
-  allMonthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,target:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].target+=num(row,'Objetivo')});
-  const loadedActual={},loadedTarget={};
-  let ecomMonthTarget=0;
-  Object.keys(perDateMonth).forEach(d=>{
-    ecomMonthTarget+=perDateMonth[d].target;
-    if(perDateMonth[d].actual>0){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}
-  });
   const proj=Object.keys(loadedActual).length?projectMonth(loadedActual,daysInCalendarMonth(Object.keys(loadedActual).sort().pop()),loadedTarget,ecomMonthTarget):null;
   if(!proj){projection.classList.add('empty-state');projection.innerHTML='Sin días cargados todavía este mes.'}
   else{projection.classList.remove('empty-state');const desvioProy=proj.ponderada-ecomMonthTarget;projection.innerHTML=`<span class="section-kicker">CIERRE ESTIMADO</span><div class="deviation-number ${desvioProy>=0?'good':'bad'}">${money(proj.ponderada)}</div><div class="deviation-copy">${desvioProy>=0?'+':''}${money(desvioProy)} vs. objetivo del mes · ponderada al patrón real de días de la semana (${proj.dias}/${daysInCalendarMonth(Object.keys(loadedActual).sort().pop())} días)</div><div class="projection-alt">Lineal: ${money(proj.lineal)}</div>`}
