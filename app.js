@@ -2153,13 +2153,38 @@ function renderStorePaymentBreakdown(container,daily,ctx){
 // switchView e index.html) — es un canal único, siempre consolidado, que responde solo al rango
 // Desde/Hasta de la cabecera. weekly (ECOM_SEMANAL, sin fecha propia) se acota a los meses que
 // efectivamente aparecen en dailyAll ya filtrado por fecha, en vez de a un dropdown de mes aparte.
+// Ticket objetivo y conversión objetivo del canal: dos constantes que viven en el bloque
+// CONFIGURACIÓN de la planilla de E-commerce. Las manda el consolidador (Apps Script v11) como
+// 'Ticket obj' y 'Conversión obj' en ECOM_SEMANAL — mismos nombres que ya usa LOCAL_DIARIO, y la
+// conversión como fracción (0,01 = 1%). Se buscan también en ECOM_DIARIO y con un par de alias por
+// si en algún momento se escriben distinto. Devuelve 0 si todavía no llegan, y ahí la tabla muestra
+// "—" en vez de inventar un objetivo.
+// Se queda con el primer valor > 0: son constantes del mes repetidas fila a fila, y las semanas
+// todavía sin cargar vienen en 0.
+function ecomTargetSetting(...args){
+  const keys=args.pop();
+  for(const rows of args)for(const row of rows||[])for(const key of keys){
+    if(row[key]===undefined||row[key]===null||row[key]==='')continue;
+    const value=parseNumber(row[key]);
+    if(value>0)return value;
+  }
+  return 0;
+}
 function renderEcommerce(){
   const from=$('fromDate').value,to=$('toDate').value;
   const dailyAll=(state.tables.ECOM_DIARIO||[]).filter(row=>!from||normalizeDate(row.Fecha)>=from);
   const monthsPresent=[...new Set(dailyAll.map(row=>row.Mes).filter(Boolean))];
   const weekly=(state.tables.ECOM_SEMANAL||[]).filter(row=>!monthsPresent.length||monthsPresent.includes(row.Mes));
   const loadedDates=dailyAll.filter(row=>num(row,'Venta real')||num(row,'Visitas')).map(row=>normalizeDate(row.Fecha)).filter(Boolean).sort();
-  const cutoff=to||(loadedDates.length?loadedDates[loadedDates.length-1]:'')||todayKey();
+  // El corte NO puede pasarse del último día con datos cargados: si el día en curso ya existe como
+  // fila de ECOM_DIARIO (con su Objetivo) pero todavía no tiene ventas, sumar su objetivo infla el
+  // desvío acumulado contra un día que nadie cargó. Con el filtro "Hasta" en 17/09 y 16 días
+  // cargados daba -$933.835 contra los -$757.914 de la planilla (exactamente los $175.921 de
+  // objetivo del jueves 17) y bajaba el cumplimiento de 77,3% a 73,5% — y encima la misma tarjeta
+  // decía "16 días cargados" (bug real reportado 2026-09-17 con captura de la planilla). Si el
+  // usuario pone un "Hasta" ANTERIOR al último día cargado, ese filtro sigue mandando.
+  const lastLoaded=loadedDates.length?loadedDates[loadedDates.length-1]:'';
+  const cutoff=(to&&(!lastLoaded||to<lastLoaded))?to:(lastLoaded||to||todayKey());
   const daily=dailyAll.filter(row=>normalizeDate(row.Fecha)<=cutoff);
   const a=aggregate(daily),ratio=a.target?a.actual/a.target:0,delta=a.actual-a.target;
   // Antes usaba dailyAll[0]?.Fecha (primera fila de TODO el historial de ECOM_DIARIO, que arrastra
@@ -2167,7 +2192,9 @@ function renderEcommerce(){
   // largo del primer mes (ej. Septiembre, 30 días) en vez del mes vigente (bug real, auditoría
   // 2026-09-05). `cutoff` ya es la fecha vigente (filtro "Hasta" o el último día cargado).
   const diasEnMes=daysInCalendarMonth(cutoff);
-  const diasTranscurridos=loadedDates.length,diasRestantes=Math.max(0,diasEnMes-diasTranscurridos);
+  // loadedDates sale de dailyAll (que solo respeta "Desde"), así que se reacota a `cutoff` para que
+  // un "Hasta" anterior al último día cargado no siga contando días que la tabla ya no muestra.
+  const diasTranscurridos=loadedDates.filter(date=>date<=cutoff).length,diasRestantes=Math.max(0,diasEnMes-diasTranscurridos);
   // allMonthRows/perDateMonth/ecomMonthTarget: TODO el mes vigente de ECOM_DIARIO, ignorando el
   // filtro de fecha de "Período" de arriba — mismo criterio que ya usa Proyección Ponderada más
   // abajo (auditoría 2026-09-06), adelantado acá para que "Ritmo necesario" salga igual que la
@@ -2199,18 +2226,37 @@ function renderEcommerce(){
   const funnelTop=Math.max(totals.visitas,1);
   $('funnel').innerHTML=funnelSteps.map(([label,value,step])=>`${step!==null?`<div class="funnel-step">↓ ${percent(step)}</div>`:''}<div class="funnel-row"><span class="funnel-label">${label}</span><div class="funnel-track"><div class="funnel-fill" style="width:${Math.max(2,value/funnelTop*100)}%"></div></div><span class="funnel-value">${number(value)}</span></div>`).join('');
 
-  const roas=totals.inversion?totals.facturacion/totals.inversion:0,cpa=totals.compras?totals.inversion/totals.compras:0;
-  $('adsSummary').innerHTML=`<div class="ads-line"><span>Inversión sin impuestos</span><strong>${money(totals.inversion)}</strong></div><div class="ads-line"><span>Facturación atribuida</span><strong>${money(totals.facturacion)}</strong></div><div class="ads-line"><span>Costo por compra</span><strong>${totals.compras?money(cpa):'—'}</strong></div><div class="ads-line"><span>ROAS / BE ROAS</span><strong class="${roas>=2.8?'good':'bad'}">${roas.toFixed(2)} / 2.80</strong></div>`;
+  // "Meta" en los nombres de columna de ECOM_SEMANAL es Meta Ads (Facebook), NO "meta"=objetivo.
+  // ROAS y costo por compra van contra lo ATRIBUIDO a la pauta (Facturación Meta / Ventas Meta), no
+  // contra el total del canal: con totals.facturacion/totals.compras daba ROAS 3.44 y CPA $25.029
+  // (750.882/30) contra los 2,48 y $39.520 (750.882/19) de la planilla — y de paso pintaba en verde
+  // una pauta que la planilla marca "fuera de umbral" por estar debajo del BE ROAS de 2,80 (bug real
+  // reportado 2026-09-17 con captura de la planilla).
+  const roas=totals.inversion?totals.facturacionMeta/totals.inversion:0,cpa=totals.ventasMeta?totals.inversion/totals.ventasMeta:0;
+  $('adsSummary').innerHTML=`<div class="ads-line"><span>Inversión sin impuestos</span><strong>${money(totals.inversion)}</strong></div><div class="ads-line"><span>Facturación atribuida</span><strong>${money(totals.facturacionMeta)}</strong></div><div class="ads-line"><span>Costo por compra</span><strong>${totals.ventasMeta?money(cpa):'—'}</strong></div><div class="ads-line"><span>ROAS / BE ROAS</span><strong class="${roas>=2.8?'good':'bad'}">${roas.toFixed(2)} / 2.80</strong></div>`;
 
+  // Objetivos del mes: el mensual sale de la suma de `Objetivo` de ECOM_DIARIO (ecomMonthTarget, ya
+  // calculado arriba — coincide exacto con el "Objetivo Mensual" del bloque CONFIGURACIÓN). Ticket
+  // objetivo y conversión objetivo son las DOS constantes que faltan: viven solo en ese bloque de la
+  // planilla, así que las lee del endpoint apenas aparezcan (ver ecomTargetSetting). Mientras no
+  // vengan, las filas que dependen de ellas muestran "—" en vez de inventar un número: antes esta
+  // tabla usaba las columnas de Meta Ads como si fueran el objetivo y mostraba "objetivo" 3.545
+  // visitas / 19 ventas (lo que trajo la pauta) contra las 7.845 / 78 reales de la planilla.
+  const ticketObj=ecomTargetSetting(weekly,daily,['Ticket obj','Ticket obj.','Ticket objetivo']);
+  const convObj=ecomTargetSetting(weekly,daily,['Conversión obj','Conversión obj.','Conversión objetivo']);
+  const ventasObj=ticketObj?ecomMonthTarget/ticketObj:null;
+  const visitasObj=ventasObj!==null&&convObj?ventasObj/convObj:null;
+  const faltante=Math.max(0,ecomMonthTarget-a.actual);
+  const traficoRestante=ticketObj&&convObj?faltante/ticketObj/convObj:null;
   const monthRows=[
-    ['Visitas',totals.visitas,totals.visitasMeta,number],
-    ['Q Ventas',totals.compras,totals.ventasMeta,number],
-    ['Conversión',totals.visitas?totals.compras/totals.visitas*100:0,totals.visitasMeta?totals.ventasMeta/totals.visitasMeta*100:0,percent],
-    ['Ticket prom.',totals.compras?totals.facturacion/totals.compras:0,totals.ventasMeta?totals.facturacionMeta/totals.ventasMeta:0,money],
-    ['Venta / día',diasTranscurridos?a.actual/diasTranscurridos:0,diasEnMes?a.target/diasEnMes:0,money],
-    ['Tráfico restante',Math.max(0,totals.visitasMeta-totals.visitas),totals.visitasMeta,number]
+    ['Visitas',totals.visitas,visitasObj,number],
+    ['Q Ventas',totals.compras,ventasObj,number],
+    ['Conversión',totals.visitas?totals.compras/totals.visitas*100:0,convObj?convObj*100:null,percent],
+    ['Ticket prom.',totals.compras?totals.facturacion/totals.compras:0,ticketObj||null,money],
+    ['Venta / día',diasTranscurridos?a.actual/diasTranscurridos:0,diasEnMes?ecomMonthTarget/diasEnMes:null,money],
+    ['Tráfico restante',traficoRestante,visitasObj,number]
   ];
-  $('ecomMonthTable').innerHTML=`<thead><tr><th>Métrica</th><th class="align-right">Total</th><th class="align-right">Objetivo</th></tr></thead><tbody>${monthRows.map(([label,tot,obj,fmt])=>`<tr><td class="seller-name">${label}</td><td class="num">${fmt(tot)}</td><td class="num">${fmt(obj)}</td></tr>`).join('')}</tbody>`;
+  $('ecomMonthTable').innerHTML=`<thead><tr><th>Métrica</th><th class="align-right">Total</th><th class="align-right">Objetivo</th></tr></thead><tbody>${monthRows.map(([label,tot,obj,fmt])=>`<tr><td class="seller-name">${label}</td><td class="num">${tot===null?'—':fmt(tot)}</td><td class="num">${obj===null?'—':fmt(obj)}</td></tr>`).join('')}</tbody>`;
 
   const projection=$('ecomProjection');
   // Proyección Ponderada replica la fórmula real de la planilla de E-commerce (SUMPRODUCTO de la
