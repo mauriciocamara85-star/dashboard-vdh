@@ -318,6 +318,205 @@ function renderStoreFocus(rows){
   $('storeFocusRowsCount').textContent=`${focusRows.length} locales`;
   $('storeFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Local</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th class="align-right">Tráfico</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="num">${r.trafficRatio!==null?percent(r.trafficRatio*100):number(r.traffic||0)}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
 }
+// ── Ventas por sucursal (pestaña propia de Locales) ─────────────────────────────
+// Réplica de la planilla "Ventas por sucursal" armada con lo que publica el consolidador. Tres
+// cosas que valen para toda la tabla:
+//  · Efectivo/Tarjeta/Descuento/PxT llegan como PORCENTAJE mensual repetido en cada fila del día
+//    (no como monto, y no por día). Se promedian sobre los días donde vinieron cargados —mismo
+//    criterio y mismo motivo que el bloque `monthly` de renderStores— y los pesos se derivan
+//    aplicando ese % sobre la venta del período. Con un filtro de fechas de media semana el % sigue
+//    siendo el del mes entero: no hay un dato más fino en el endpoint.
+//  · "Venta real" es la venta NETA (= Efectivo + Tarjeta). El "Total" de la planilla es el BRUTO,
+//    antes del descuento: Total = Venta / (1 − % Descuento) y Descuentos = Total − Venta.
+//    Verificado contra la planilla: Unicenter $26.900.101 × 23,69% = $6.372.634 de descuentos.
+//  · La cantidad de TICKETS no viene en el endpoint: se deriva como Venta del día ÷ Ticket promedio
+//    del día, que da entero exacto en la enorme mayoría de los días cargados. De ahí salen también
+//    Cantidad (tickets × PxT), Producto promedio y la conversión de esta tabla.
+// OJO con Tráfico/Conversión: acá son los de la planilla (gente que ENTRÓ al local), no los del
+// sistema de ventas (clientes ATENDIDOS). Son dos métricas distintas y esta da más baja: un reporte
+// de caja divide por los clientes atendidos, este por todos los que cruzaron la puerta. Se aclara
+// en la nota al pie del panel para que nadie lo lea como un error de cálculo.
+const TICKET_MIN_VALIDO=1000;
+
+// Precio de lista de accesorios (dato del negocio, no viene en el endpoint: el consolidador manda
+// SOLO las unidades vendidas de cada uno). Los pesos de perfumes/boxers se estiman como
+// unidades × este precio, así que son precio de LISTA, no lo efectivamente facturado: con
+// descuentos o promos el número real es menor. Si cambian los precios, se editan acá.
+const PRECIO_PERFUME=23999,PRECIO_BOXER=17999;
+// Objetivo de participación de cada categoría sobre la venta del local, para la columna "Falta 2%".
+const ACCESORIO_OBJETIVO_PCT=0.02;
+
+// Perfumes/Boxers vienen por VENDEDOR y por SEMANA (VENDEDOR_SEMANAL), no por día ni por local: se
+// suman los vendedores de cada local en las semanas que toca el período filtrado. Si el filtro de
+// fechas corta una semana por la mitad entra la semana entera — es la única granularidad publicada.
+function accessoryUnitsByStore(weekKeys){
+  const out={};
+  (state.tables.VENDEDOR_SEMANAL||[]).forEach(row=>{
+    if(!weekKeys.has(`${row.Mes}|${row.Semana}`))return;
+    const local=row.Local||'Sin local';
+    const entry=out[local]||(out[local]={perfumes:0,boxer:0});
+    entry.perfumes+=num(row,'Perfumes real');
+    entry.boxer+=num(row,'Boxer real');
+  });
+  return out;
+}
+
+function computeStoreBreakdownRows(rows){
+  const groups={},weekKeys=new Set();
+  rows.forEach(row=>{
+    const local=row.Local||'Sin local';
+    const g=groups[local]||(groups[local]={local,venta:0,traffic:0,tickets:0,prendas:0,diasRaros:0,
+      cash:0,cashCount:0,card:0,cardCount:0,discount:0,discountCount:0,pxt:0,pxtCount:0,
+      convObj:0,convObjCount:0,ticketObj:0,ticketObjCount:0,pxtObj:0,pxtObjCount:0});
+    const venta=num(row,'Venta real'),ticketProm=num(row,'Ticket prom.'),pxt=num(row,'PxT real');
+    g.venta+=venta;
+    g.traffic+=num(row,'Tráfico real');
+    // Piso de sanidad: hay días con el Ticket promedio cargado en miles en vez de en pesos (49 en
+    // vez de ~49.000). Sin este filtro, un solo día así mete 16.000 tickets y deja la Cantidad, la
+    // Conversión y el Producto promedio de todo el local sin sentido. Se cuentan aparte para poder
+    // avisarlo en el panel, en vez de mostrar el número roto o de esconder el problema.
+    if(venta){
+      if(ticketProm>=TICKET_MIN_VALIDO){const tickets=venta/ticketProm;g.tickets+=tickets;g.prendas+=tickets*pxt}
+      else g.diasRaros++;
+    }
+    const cash=num(row,'Efectivo'),card=num(row,'Tarjeta'),discount=num(row,'Descuento');
+    const convObj=num(row,'Conversión obj'),ticketObj=num(row,'Ticket obj'),pxtObj=num(row,'PxT obj');
+    if(cash){g.cash+=cash;g.cashCount++}
+    if(card){g.card+=card;g.cardCount++}
+    if(discount){g.discount+=discount;g.discountCount++}
+    if(pxt){g.pxt+=pxt;g.pxtCount++}
+    if(convObj){g.convObj+=convObj;g.convObjCount++}
+    if(ticketObj){g.ticketObj+=ticketObj;g.ticketObjCount++}
+    if(pxtObj){g.pxtObj+=pxtObj;g.pxtObjCount++}
+    if(row.Mes!==undefined&&row.Semana!==undefined)weekKeys.add(`${row.Mes}|${row.Semana}`);
+  });
+  const accesorios=accessoryUnitsByStore(weekKeys);
+  return Object.values(groups).map(g=>{
+    const avg=(sum,count)=>count?sum/count:0;
+    const pctCash=avg(g.cash,g.cashCount),pctCard=avg(g.card,g.cardCount),pctDiscount=avg(g.discount,g.discountCount);
+    const bruto=pctDiscount>0&&pctDiscount<1?g.venta/(1-pctDiscount):g.venta;
+    const acc=accesorios[g.local]||{perfumes:0,boxer:0};
+    const perfumesMonto=acc.perfumes*PRECIO_PERFUME,boxerMonto=acc.boxer*PRECIO_BOXER;
+    const objetivoAcc=g.venta*ACCESORIO_OBJETIVO_PCT;
+    return{
+      local:g.local,venta:g.venta,bruto,descuentos:bruto-g.venta,pctDiscount,
+      efectivo:g.venta*pctCash,tarjeta:g.venta*pctCard,pctCash,pctCard,
+      tickets:g.tickets,prendas:g.prendas,traffic:g.traffic,
+      vtaFallida:Math.max(0,g.traffic-g.tickets),
+      conversion:g.traffic?g.tickets/g.traffic:null,
+      ticketProm:g.tickets?g.venta/g.tickets:0,
+      productoProm:g.prendas?g.venta/g.prendas:0,
+      pxt:avg(g.pxt,g.pxtCount),
+      convObj:avg(g.convObj,g.convObjCount),ticketObj:avg(g.ticketObj,g.ticketObjCount),pxtObj:avg(g.pxtObj,g.pxtObjCount),
+      perfumes:acc.perfumes,perfumesMonto,perfumesPct:g.venta?perfumesMonto/g.venta:0,perfumesFalta:objetivoAcc-perfumesMonto,
+      boxer:acc.boxer,boxerMonto,boxerPct:g.venta?boxerMonto/g.venta:0,boxerFalta:objetivoAcc-boxerMonto,
+      diasRaros:g.diasRaros
+    };
+  });
+}
+
+const STORE_BREAKDOWN_SORT={
+  local:r=>r.local,bruto:r=>r.bruto,descuentos:r=>r.descuentos,pctDiscount:r=>r.pctDiscount,
+  efectivo:r=>r.efectivo,tarjeta:r=>r.tarjeta,pctCash:r=>r.pctCash,pctCard:r=>r.pctCard,
+  prendas:r=>r.prendas,tickets:r=>r.tickets,vtaFallida:r=>r.vtaFallida,traffic:r=>r.traffic,
+  conversion:r=>r.conversion??-1,ticketProm:r=>r.ticketProm,productoProm:r=>r.productoProm,pxt:r=>r.pxt
+};
+const STORE_ACCESSORY_SORT={
+  local:r=>r.local,perfumes:r=>r.perfumes,perfumesMonto:r=>r.perfumesMonto,perfumesPct:r=>r.perfumesPct,
+  perfumesFalta:r=>r.perfumesFalta,boxer:r=>r.boxer,boxerMonto:r=>r.boxerMonto,boxerPct:r=>r.boxerPct,boxerFalta:r=>r.boxerFalta
+};
+
+// Ordena `list` in-place según la columna elegida en esa tabla; sin columna elegida, el que más
+// vendió arriba. Lo comparten las dos tablas del panel, que tienen su propio state.sort.table.
+function sortBreakdownList(list,tableId,sortMap){
+  const active=state.sort.table===tableId?sortMap[state.sort.key]:null;
+  list.sort((a,b)=>{
+    if(!active)return b.venta-a.venta;
+    const av=active(a),bv=active(b);
+    if(typeof av==='string')return av.localeCompare(bv,'es')*state.sort.direction;
+    return (av<bv?-1:av>bv?1:0)*state.sort.direction;
+  });
+}
+function breakdownHeader(cols,tableId){
+  return `<thead><tr>${cols.map(([label,key])=>{
+    const isActive=state.sort.table===tableId&&state.sort.key===key;
+    const sortAttr=isActive?(state.sort.direction>0?'ascending':'descending'):'none';
+    return `<th data-sort="${key}" tabindex="0" aria-sort="${sortAttr}"${key==='local'?'':' class="align-right"'}>${label}${isActive?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`;
+  }).join('')}</tr></thead>`;
+}
+const pxtTexto=value=>value.toFixed(2).replace('.',',');
+
+function renderStoreBreakdown(rows){
+  const base=computeStoreBreakdownRows(rows);
+  const vacio=id=>{$(`${id}RowsCount`).textContent='';$(`${id}Table`).innerHTML='<tbody><tr><td class="empty-state">Sin datos para estos filtros</td></tr></tbody>'};
+  if(!base.length){vacio('storeBreakdown');vacio('storeAccessory');$('storeBreakdownNote').textContent='';return}
+
+  // Totales: los montos y las unidades se suman; los porcentajes se RECALCULAN sobre esos totales
+  // (o sea, ponderados por venta), nunca se promedian los promedios de cada local.
+  const t=base.reduce((acc,r)=>{['venta','bruto','descuentos','efectivo','tarjeta','tickets','prendas','traffic','vtaFallida','perfumes','perfumesMonto','boxer','boxerMonto'].forEach(k=>acc[k]+=r[k]);return acc},
+    {venta:0,bruto:0,descuentos:0,efectivo:0,tarjeta:0,tickets:0,prendas:0,traffic:0,vtaFallida:0,perfumes:0,perfumesMonto:0,boxer:0,boxerMonto:0});
+  const cobrado=t.efectivo+t.tarjeta,objetivoAcc=t.venta*ACCESORIO_OBJETIVO_PCT;
+  const tot={...t,pctDiscount:t.bruto?t.descuentos/t.bruto:0,pctCash:cobrado?t.efectivo/cobrado:0,pctCard:cobrado?t.tarjeta/cobrado:0,
+    conversion:t.traffic?t.tickets/t.traffic:null,ticketProm:t.tickets?t.venta/t.tickets:0,productoProm:t.prendas?t.venta/t.prendas:0,
+    pxt:t.tickets?t.prendas/t.tickets:0,
+    perfumesPct:t.venta?t.perfumesMonto/t.venta:0,perfumesFalta:objetivoAcc-t.perfumesMonto,
+    boxerPct:t.venta?t.boxerMonto/t.venta:0,boxerFalta:objetivoAcc-t.boxerMonto};
+
+  // Semáforo solo donde hay un objetivo REAL cargado en la planilla (Conversión obj, Ticket obj,
+  // PxT obj). Para % Descuento no existe objetivo: se muestra neutro y el promedio de la red queda
+  // en la fila de Total, que es contra lo que se compara para ver quién se va de escala.
+  const tone=(actual,target)=>!target?'':actual>=target?'positive':actual>=target*0.9?'warning':'negative';
+
+  const cols=[['Local','local'],['Total','bruto'],['Descuentos','descuentos'],['% Desc.','pctDiscount'],
+    ['Efectivo','efectivo'],['Tarjeta','tarjeta'],['% Efec.','pctCash'],['% Tarj.','pctCard'],
+    ['Cantidad','prendas'],['Ventas','tickets'],['Vta. fallida','vtaFallida'],['Tráfico','traffic'],
+    ['Conversión','conversion'],['Ticket prom.','ticketProm'],['Producto prom.','productoProm'],['PxT','pxt']];
+  const celdas=(r,conSemaforo)=>`<td class="num">${money(r.bruto)}</td><td class="num">${money(r.descuentos)}</td><td class="num">${percent(r.pctDiscount*100)}</td>`+
+    `<td class="num">${money(r.efectivo)}</td><td class="num">${money(r.tarjeta)}</td>`+
+    `<td class="num">${percent(r.pctCash*100)}</td><td class="num">${percent(r.pctCard*100)}</td>`+
+    `<td class="num">${number(r.prendas)}</td><td class="num">${number(r.tickets)}</td>`+
+    `<td class="num">${number(r.vtaFallida)}</td><td class="num">${number(r.traffic)}</td>`+
+    `<td class="num ${conSemaforo?tone(r.conversion||0,r.convObj):''}">${r.conversion===null?'—':percent(r.conversion*100)}</td>`+
+    `<td class="num ${conSemaforo?tone(r.ticketProm,r.ticketObj):''}">${money(r.ticketProm)}</td>`+
+    `<td class="num">${money(r.productoProm)}</td>`+
+    `<td class="num ${conSemaforo?tone(r.pxt,r.pxtObj):''}">${pxtTexto(r.pxt)}</td>`;
+  const lista=[...base];sortBreakdownList(lista,'storeBreakdownTable',STORE_BREAKDOWN_SORT);
+  $('storeBreakdownTable').innerHTML=breakdownHeader(cols,'storeBreakdownTable')+
+    `<tbody>${lista.map(r=>`<tr><td class="seller-name">${escapeHtml(r.local)}</td>${celdas(r,true)}</tr>`).join('')}`+
+    `<tr class="breakdown-total"><td class="seller-name">Total</td>${celdas(tot,false)}</tr></tbody>`;
+  $('storeBreakdownRowsCount').textContent=`${lista.length} ${lista.length===1?'local':'locales'}`;
+
+  // Accesorios en tabla aparte (como las dos planillas de Perfumes y Boxer): el consolidador manda
+  // solo unidades, los pesos son unidades × precio de lista (ver PRECIO_PERFUME/PRECIO_BOXER).
+  // "Falta 2%" es cuánto más habría que vender de esa categoría para llegar al 2% de la venta del
+  // local; en negativo significa que ya lo superó.
+  const accCols=[['Local','local'],['Perfumes u.','perfumes'],['Perfumes $','perfumesMonto'],['% s/venta','perfumesPct'],['Falta 2%','perfumesFalta'],
+    ['Boxers u.','boxer'],['Boxers $','boxerMonto'],['% s/venta','boxerPct'],['Falta 2%','boxerFalta']];
+  const accCeldas=r=>`<td class="num">${number(r.perfumes)}</td><td class="num">${money(r.perfumesMonto)}</td>`+
+    `<td class="num ${r.perfumesPct>=ACCESORIO_OBJETIVO_PCT?'positive':'negative'}">${percent(r.perfumesPct*100)}</td>`+
+    `<td class="num">${r.perfumesFalta<=0?'✓':money(r.perfumesFalta)}</td>`+
+    `<td class="num">${number(r.boxer)}</td><td class="num">${money(r.boxerMonto)}</td>`+
+    `<td class="num ${r.boxerPct>=ACCESORIO_OBJETIVO_PCT?'positive':'negative'}">${percent(r.boxerPct*100)}</td>`+
+    `<td class="num">${r.boxerFalta<=0?'✓':money(r.boxerFalta)}</td>`;
+  const accLista=[...base];sortBreakdownList(accLista,'storeAccessoryTable',STORE_ACCESSORY_SORT);
+  $('storeAccessoryTable').innerHTML=breakdownHeader(accCols,'storeAccessoryTable')+
+    `<tbody>${accLista.map(r=>`<tr><td class="seller-name">${escapeHtml(r.local)}</td>${accCeldas(r)}</tr>`).join('')}`+
+    `<tr class="breakdown-total"><td class="seller-name">Total</td>${accCeldas(tot)}</tr></tbody>`;
+  $('storeAccessoryRowsCount').textContent=`${money(tot.perfumesMonto+tot.boxerMonto)} en accesorios`;
+
+  // Los avisos aparecen solo cuando corresponde, en vez de un texto fijo que nadie lee: la plata
+  // que se fue sin comprar (lo más accionable de la tabla) y los días con el Ticket promedio mal
+  // cargado en la planilla, que quedaron fuera del cálculo de unidades.
+  const raros=base.filter(r=>r.diasRaros>0);
+  $('storeBreakdownNote').innerHTML=[
+    'Tráfico y Conversión salen de la planilla: cuentan la gente que ENTRÓ al local, no los clientes atendidos en el sistema de ventas. Por eso la conversión da más baja que la de un reporte de caja.',
+    tot.vtaFallida>0?`Las <strong>${number(tot.vtaFallida)}</strong> personas que entraron y no compraron equivalen a <strong>${money(tot.vtaFallida*tot.ticketProm)}</strong> al ticket promedio de la red.`:'',
+    raros.length?`<span class="negative">Revisar la planilla:</span> ${raros.map(r=>`${escapeHtml(r.local)} (${r.diasRaros} ${r.diasRaros===1?'día':'días'})`).join(', ')} tienen el Ticket promedio cargado en miles en vez de en pesos. Esos días quedaron fuera de Cantidad, Ventas y Conversión.`:'',
+    `Los pesos de accesorios son unidades × precio de lista (perfume ${money(PRECIO_PERFUME)}, boxer ${money(PRECIO_BOXER)}): con descuentos, lo facturado es menor.`
+  ].filter(Boolean).join(' ');
+  attachSortHeaders('storeBreakdownTable');
+  attachSortHeaders('storeAccessoryTable');
+}
 // Conversión/Ticket objetivo son un valor mensual del LOCAL (no por vendedor, ver mapa de celdas del
 // Sheet), así que el objetivo de cada vendedor para el diagnóstico es el de SU local — se cruza contra
 // LOCAL_DIARIO filtrado por Local+Mes (no por Semana: es una constante mensual repetida por día).
@@ -369,6 +568,7 @@ function applyStoreTab(){
   qa('#storeViewTabs .rank-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.tab===state.storeTab));
   $('storeResumenPanel').hidden=state.storeTab!=='resumen';
   $('storeFocusPanel').hidden=state.storeTab!=='foco';
+  $('storeBreakdownPanel').hidden=state.storeTab!=='sucursales';
 }
 function applySellerTab(){
   qa('#sellerViewTabs .rank-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.tab===state.sellerTab));
@@ -1911,6 +2111,7 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   renderTrafficFunnel('storeFunnel',rows.length>0,a.traffic,avgConv);
   renderDiagnosisPanel('storeDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderStoreFocus(rows);
+  renderStoreBreakdown(rows);
   const columns=[['Fecha','Fecha'],['Local','Local'],['Día','Día'],['Objetivo','Objetivo'],['Venta real','Venta real'],['Desvío','__delta'],['Tráfico','Tráfico real'],['Conversión','Conversión'],['Ticket','Ticket prom.']];renderTable('storeTable',rows,columns,row=>({...row,__delta:num(row,'Venta real')-num(row,'Objetivo')}),4);$('storeRowsCount').textContent=`${rows.length} días`}
 
 // ── Cabecera de "Locales": 6 tarjetas selectoras + gráfico dinámico ──────────

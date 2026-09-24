@@ -585,6 +585,12 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .table-wrap{overflow-x:auto;overflow-y:visible;margin:0 -22px -22px;border-radius:0 0 var(--radius) var(--radius)}
 .table-wrap table{border-collapse:collapse;width:100%;text-align:left;font-size:12px}
 .table-wrap table.table-wide{min-width:720px}
+/* "Ventas por sucursal": 18 columnas no entran en el min-width de .table-wide. La fila de
+   Total va al final del <tbody> y no en un <tfoot> para que quede pegada a los datos al
+   scrollear, y se despega visualmente con borde + fondo en vez de con una tabla aparte. */
+.table-wrap table.table-breakdown{min-width:1580px}
+tr.breakdown-total td{border-top:2px solid var(--line);font-weight:700;background:var(--row2)}
+
 .table-wrap th{background:var(--sub);color:#D8E4F2;font-size:10px;letter-spacing:.5px;font-weight:700;text-transform:uppercase;padding:11px 12px;white-space:nowrap;position:sticky;top:0;z-index:2}
 .table-wrap th[data-sort]{cursor:pointer;user-select:none}
 /* :hover/:active reales solo se enganchan en dispositivos con mouse de verdad (hover:hover). En
