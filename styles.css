@@ -902,6 +902,64 @@ html[data-theme="light"] .store-kpi-card.active .store-kpi-label{color:#B45309}
    nuevos, así no hay que elegir una paleta aparte para el tema claro. */
 .spark-seg-a{fill:currentColor;opacity:.85}
 .spark-seg-b{fill:currentColor;opacity:.3}
+
+/* ── LOCALES · MÓDULO DE ANÁLISIS del panel de detalle (ver barrasDiariasHtml en app.js) ──
+   Franja de tarjetas + gráfico con escala. El SVG se estira a lo ancho y el texto va en HTML encima
+   posicionado en %, así que acá todo lo que es texto (ejes, rótulos, tooltip) es position:absolute
+   dentro de .cm-plot / .cm-yaxis / .cm-xaxis. */
+.cm{display:flex;flex-direction:column;gap:20px}
+.cm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.cm-stat{background:var(--ink);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px 13px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.cm-stat-label{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);font-weight:700}
+.cm-stat-value{font:600 24px var(--display);color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15}
+.cm-stat-value small{font:500 12px var(--sans);color:var(--muted);margin-left:5px}
+.cm-stat-value.good{color:var(--mint)}
+.cm-stat-value.warning{color:var(--amber)}
+.cm-stat-value.bad{color:var(--red)}
+.cm-stat-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm-stat-sub b{font-weight:700}
+.cm-stat-sub .good,.cm-tooltip .good{color:var(--mint)}
+.cm-stat-sub .bad,.cm-tooltip .bad{color:var(--red)}
+
+/* 280px de alto para el área de barras + 24px para las fechas. La columna de 46px es el eje Y. */
+.cm-chart{display:grid;grid-template-columns:46px minmax(0,1fr);grid-template-rows:280px 24px;column-gap:10px;margin-top:6px}
+.cm-yaxis{position:relative}
+.cm-yaxis span{position:absolute;right:0;transform:translateY(-50%);font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cm-plot{position:relative;min-width:0}
+.cm-plot>svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.cm-xaxis{position:relative;grid-column:2}
+.cm-xaxis span{position:absolute;top:8px;transform:translateX(-50%);font-size:10.5px;color:var(--muted);white-space:nowrap}
+
+.cm-grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.cm-bar{fill:var(--amber);opacity:.85;transition:opacity .12s}
+.cm-bar.cm-hover{opacity:1}
+/* Parcial: la misma barra pero lavada — se ve que hubo gente, y que no es todo el dato. */
+.cm-bar-parcial{opacity:.35}
+.cm-bar-parcial.cm-hover{opacity:.55}
+.cm-bar-fantasma{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
+.cm-bar-fantasma.cm-hover{stroke:var(--white)}
+.cm-obj{stroke:var(--white);stroke-width:2.5;stroke-linecap:round;vector-effect:non-scaling-stroke;opacity:.85}
+.cm-prom{stroke:var(--muted);stroke-width:1.25;stroke-dasharray:6 5;vector-effect:non-scaling-stroke}
+.cm-prom-label{position:absolute;right:0;transform:translateY(-125%);font-size:10px;color:var(--muted);background:var(--card);padding:1px 6px;border-radius:4px;pointer-events:none}
+
+.cm-callout{position:absolute;transform:translate(-50%,calc(-100% - 8px));display:flex;flex-direction:column;align-items:center;gap:1px;font:600 11.5px var(--display);color:var(--white);white-space:nowrap;padding:3px 8px;border-radius:6px;background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow-card);pointer-events:none;z-index:2}
+.cm-callout span{font:700 8.5px var(--sans);letter-spacing:.7px;text-transform:uppercase;color:var(--muted)}
+.cm-callout-pico{border-color:var(--amber)}
+.cm-callout-min{border-color:rgba(239,68,68,.55)}
+/* Vertical y leyendo de abajo hacia arriba, dentro del hueco del día: con un mes entero cada día
+   tiene ~40px y en horizontal pisaría a los vecinos. */
+.cm-dia-raro{position:absolute;bottom:6px;transform:translateX(-50%) rotate(180deg);writing-mode:vertical-rl;font:700 9px var(--sans);letter-spacing:1px;text-transform:uppercase;color:var(--muted);white-space:nowrap;pointer-events:none}
+.cm-dia-parcial{position:absolute;transform:translate(-50%,calc(-100% - 4px));font:700 9px var(--sans);letter-spacing:.6px;text-transform:uppercase;color:var(--amber);pointer-events:none}
+.cm-tooltip{z-index:3;min-width:160px}
+
+.cm-foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;font-size:11px;color:var(--muted)}
+.cm-key{display:inline-flex;align-items:center;gap:6px}
+.cm-key i{display:inline-block;width:12px;height:10px;border-radius:2px}
+.cm-key i.cm-key-bar{background:var(--amber)}
+.cm-key i.cm-key-obj{height:3px;background:var(--white)}
+.cm-key i.cm-key-prom{height:0;border-top:1.5px dashed var(--muted);border-radius:0}
+.cm-foot-raros{margin-left:auto}
+@media(max-width:900px){.cm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cm-foot-raros{margin-left:0}}
 @media(max-width:900px){.store-kpi-grid{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)}}
 @media(max-width:560px){.store-kpi-grid{grid-template-columns:1fr;grid-template-rows:none}}
 

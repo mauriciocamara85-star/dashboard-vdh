@@ -2285,12 +2285,22 @@ function storeDailySeries(rows){
   rows.forEach(row=>{
     const date=normalizeDate(row.Fecha);
     if(!date)return;
-    if(!byDate[date])byDate[date]={actual:0,target:0,traffic:0,trafficTarget:0,pond:nuevoPonderado(),cash:0,card:0,discount:0,payCount:0};
+    if(!byDate[date])byDate[date]={actual:0,target:0,traffic:0,trafficTarget:0,trafficTargetConDato:0,esperados:0,conTrafico:0,conVenta:0,pond:nuevoPonderado(),cash:0,card:0,discount:0,payCount:0};
     const d=byDate[date];
-    d.actual+=num(row,'Venta real');
-    d.target+=num(row,'Objetivo');
-    d.traffic+=num(row,'Tráfico real');
-    d.trafficTarget+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
+    const venta=num(row,'Venta real'),objetivo=num(row,'Objetivo'),trafico=num(row,'Tráfico real'),traficoObj=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
+    d.actual+=venta;
+    d.target+=objetivo;
+    d.traffic+=trafico;
+    d.trafficTarget+=traficoObj;
+    // Cuántos locales se esperaban ese día (los que tienen objetivo) y cuántos cargaron cada dato.
+    // Con eso los gráficos distinguen un día cerrado, uno sin cargar y uno a medio cargar de una
+    // caída real — ver estadoDelDia(). Van por separado porque el tráfico se carga aparte de la
+    // venta: el 30/09 Rivadavia y Villa del Parque cargaron una y no el otro.
+    if(objetivo>0){d.esperados++;if(trafico>0)d.conTrafico++;if(venta>0)d.conVenta++}
+    // El objetivo de tráfico SOLO de los locales que cargaron tráfico: comparar la gente que vino
+    // contra lo que se necesitaba en un local que no informó cuenta su faltante de carga como si
+    // hubiera ido menos gente.
+    if(trafico>0)d.trafficTargetConDato+=traficoObj;
     sumarPonderado(d.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),0);
     d.cash+=num(row,'Efectivo');d.card+=num(row,'Tarjeta');d.discount+=num(row,'Descuento');d.payCount++;
   });
@@ -2298,6 +2308,7 @@ function storeDailySeries(rows){
     const d=byDate[date];
     return{
       date,actual:d.actual,target:d.target,traffic:d.traffic,trafficTarget:d.trafficTarget,
+      trafficTargetConDato:d.trafficTargetConDato,esperados:d.esperados,conTrafico:d.conTrafico,conVenta:d.conVenta,
       // La conversión del día se calcula contra el tráfico de ESE día (sumarPonderado se llama
       // con tráfico 0 porque el tráfico ya viene acumulado aparte, en d.traffic).
       conversion:d.traffic?cerrarPonderado(d.pond).tickets/d.traffic*100:null,
@@ -2392,11 +2403,220 @@ function renderStoreKpiGrid(ctx,daily){
   $('storeKpiSub-ticket').textContent=hasTicketObj?`objetivo ${money(avgTicketObj)}`:'venta promedio por compra';
 
   $('storeKpiValue-trafico').textContent=number(a.traffic);
-  $('storeKpiSub-trafico').textContent=a.targetTraffic?`${percent(a.traffic/a.targetTraffic*100)} del objetivo`:'personas registradas';
+  // Contra el objetivo SOLO de los locales que cargaron tráfico, igual que la tarjeta "Vs. objetivo"
+  // del módulo de abajo. Antes dividía por el objetivo de TODOS (a.targetTraffic): un local que no
+  // informó tráfico sumaba su objetivo y nada de gente, y el cumplimiento bajaba por un faltante de
+  // carga. Las dos tarjetas tienen que decir el mismo número.
+  const objTrafConDato=serie.reduce((s,d)=>s+(d.trafficTargetConDato||0),0);
+  $('storeKpiSub-trafico').textContent=objTrafConDato?`${percent(a.traffic/objTrafConDato*100)} del objetivo`:'personas registradas';
 
   $('storeKpiValue-pagos').textContent=hasPayment?percent(avgCash*100):'—';
   $('storeKpiSub-pagos').textContent=hasPayment?`Efvo. · Tarjeta ${percent(avgCard*100)} · Desc. ${percent(avgDiscount*100)}`:'Agregar columna en el Sheet';
 }
+// ── Panel de detalle de Locales: módulos de análisis ─────────────────────────────
+// Cada métrica del panel de abajo pasa a ser una franja de tarjetas con las cifras del período más
+// un gráfico con escala, fechas repartidas y los días raros marcados, en vez de una línea sola sobre
+// fondo oscuro (pedido 2026-10-01). Arranca por Tráfico como plantilla; las otras métricas siguen
+// con su gráfico anterior hasta pasarlas a este mismo formato.
+
+const DIA_CORTO=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+const diaCortoDe=fecha=>DIA_CORTO[new Date(`${fecha}T00:00:00`).getDay()];
+
+// Un día puede venir vacío o bajo por tres motivos, y ninguno es una caída real del indicador:
+//   cerrado   — ningún local tenía objetivo: no se esperaba vender (feriado, o domingo si el filtro
+//               es un local de calle). Es la misma regla del recordatorio de cierre de las 20:00.
+//   sinCargar — había locales con objetivo y ninguno cargó el dato (típicamente: hoy).
+//   parcial   — cargaron algunos y otros no. El 30/09 Rivadavia y Villa del Parque vendieron sin
+//               cargar tráfico: la barra de ese día sale baja por un faltante, no por menos gente.
+// `cargados` es cuántos locales con objetivo tienen el dato de ESTA métrica, y `valor` el dato en
+// sí: un día sin objetivo pero con datos (un local abierto fuera de plan) cuenta como normal.
+//
+// Límite conocido: si una planilla no cargó el objetivo de un día que sí trabajó, ese local cuenta
+// como cerrado. Con los datos que llegan no hay forma de distinguirlo — el 01/10 seis locales
+// tienen objetivo $0 en un jueves común.
+function estadoDelDia(d,cargados,valor){
+  if(!d.esperados)return valor>0?'ok':'cerrado';
+  if(!cargados)return'sinCargar';
+  if(cargados<d.esperados)return'parcial';
+  return'ok';
+}
+
+// Cortes "redondos" para el eje Y (0, 100, 200… en vez de 0, 96, 192). El tope deja aire sobre el
+// máximo para que el rótulo del pico no choque contra el borde de arriba.
+function escalaRedonda(maximo,cortes=4){
+  if(!(maximo>0))return{ticks:[0,1],tope:1};
+  const crudo=maximo/cortes,mag=Math.pow(10,Math.floor(Math.log10(crudo))),norm=crudo/mag;
+  const paso=(norm<=1?1:norm<=2?2:norm<=2.5?2.5:norm<=5?5:10)*mag;
+  const tope=Math.ceil(maximo*1.12/paso)*paso;
+  const ticks=[];
+  for(let v=0;v<=tope+paso/2;v+=paso)ticks.push(Math.round(v*1e6)/1e6);
+  return{ticks,tope};
+}
+
+// Franja de tarjetas + cuerpo (el gráfico) + pie (leyenda y qué días están marcados).
+function moduloAnalisisHtml(stats,cuerpo,pie){
+  const tarjetas=stats.map(s=>`<div class="cm-stat"><span class="cm-stat-label">${s.label}</span><strong class="cm-stat-value${s.tone?` ${s.tone}`:''}">${s.value}</strong><span class="cm-stat-sub">${s.sub||''}</span></div>`).join('');
+  return`<div class="cm"><div class="cm-stats">${tarjetas}</div>${cuerpo}${pie?`<div class="cm-foot">${pie}</div>`:''}</div>`;
+}
+
+// Barras diarias con escala, el objetivo de cada día como una marca sobre su barra, el promedio
+// punteado, el pico / el mínimo / el último día rotulados y los días raros señalados.
+//
+// El SVG se estira a lo ancho (preserveAspectRatio="none", coordenadas en milésimas) y TODO el texto
+// va en HTML encima, posicionado en %: queda nítido y del mismo tamaño en cualquier pantalla sin
+// medir nada ni redibujar al cambiar el ancho de la ventana (el dashboard no tiene listener de
+// resize). Por eso en el SVG no hay círculos ni texto, que saldrían deformados, y las líneas llevan
+// vector-effect="non-scaling-stroke".
+//
+// `datos` llega como [{d,v,obj,estado}]: quién llama sabe qué es cada número y arma las tarjetas.
+function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
+  const n=datos.length;
+  const maximo=Math.max(1,...datos.map(x=>Math.max(x.v,x.estado==='cerrado'?0:x.obj)));
+  const{ticks,tope}=escalaRedonda(maximo);
+  const Y=v=>1000-(v/tope)*1000;
+  const banda=1000/n,ancho=Math.min(banda*.62,48);
+  const X=i=>i*banda+(banda-ancho)/2,centro=i=>(i+.5)*banda;
+  const pct=v=>(v/10).toFixed(2);   // milésimas del SVG → % para el HTML de encima
+
+  const grilla=ticks.map(t=>`<line class="cm-grid" x1="0" x2="1000" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"></line>`).join('');
+  const barras=datos.map((x,i)=>{
+    if(x.estado==='cerrado')return'';
+    // Lo que falta cargar va como silueta punteada hasta el objetivo del día: se lee "acá había que
+    // llegar y no hay dato", no "acá vino cero".
+    if(x.estado==='sinCargar')return x.obj?`<rect class="cm-bar-fantasma" data-i="${i}" x="${X(i).toFixed(1)}" y="${Y(x.obj).toFixed(1)}" width="${ancho.toFixed(1)}" height="${(1000-Y(x.obj)).toFixed(1)}"></rect>`:'';
+    return`<rect class="cm-bar${x.estado==='parcial'?' cm-bar-parcial':''}" data-i="${i}" x="${X(i).toFixed(1)}" y="${Y(x.v).toFixed(1)}" width="${ancho.toFixed(1)}" height="${(1000-Y(x.v)).toFixed(1)}"></rect>`;
+  }).join('');
+  const marcasObj=datos.map((x,i)=>(x.obj>0&&(x.estado==='ok'||x.estado==='parcial'))?`<line class="cm-obj" x1="${(X(i)-banda*.08).toFixed(1)}" x2="${(X(i)+ancho+banda*.08).toFixed(1)}" y1="${Y(x.obj).toFixed(1)}" y2="${Y(x.obj).toFixed(1)}"></line>`:'').join('');
+  const lineaProm=promedio>0?`<line class="cm-prom" x1="0" x2="1000" y1="${Y(promedio).toFixed(1)}" y2="${Y(promedio).toFixed(1)}"></line>`:'';
+
+  // Rótulos: pico y mínimo entre los días completos, más el último día con dato. Si dos caen en el
+  // mismo día se dice una sola vez con los motivos juntos — y si ese día es parcial, el rótulo lo
+  // avisa en vez de poner una segunda etiqueta encima de la misma barra.
+  const conIndice=datos.map((x,i)=>({...x,i}));
+  const completos=conIndice.filter(x=>x.estado==='ok'&&x.v>0);
+  const rotulos={};
+  const rotular=(x,motivo)=>{if(x)(rotulos[x.i]=rotulos[x.i]||{x,motivos:[]}).motivos.push(motivo)};
+  if(completos.length){
+    rotular(completos.reduce((a,b)=>b.v>a.v?b:a),'pico');
+    if(completos.length>2)rotular(completos.reduce((a,b)=>b.v<a.v?b:a),'mín.');
+  }
+  const conDato=conIndice.filter(x=>x.v>0);
+  if(conDato.length)rotular(conDato[conDato.length-1],'último');
+  const callouts=Object.values(rotulos).map(({x,motivos})=>{
+    if(x.estado==='parcial')motivos.push('parcial');
+    const cls=motivos.includes('pico')?' cm-callout-pico':motivos.includes('mín.')?' cm-callout-min':'';
+    return`<div class="cm-callout${cls}" style="left:${pct(centro(x.i))}%;top:${pct(Y(x.v))}%"><span>${motivos.join(' · ')}</span>${fmt(x.v)}</div>`;
+  }).join('');
+
+  // Días raros: rótulo vertical dentro del hueco del día (cerrado / sin cargar) o arriba de la barra
+  // (parcial). Vertical porque con un mes entero cada día tiene ~40px de ancho y "Sin cargar" en
+  // horizontal pisaría a los vecinos — el 30/09 parcial y el 01/10 sin cargar son contiguos.
+  const marcasDia=conIndice.map(x=>{
+    if(x.estado==='cerrado')return`<div class="cm-dia-raro" style="left:${pct(centro(x.i))}%">Cerrado</div>`;
+    if(x.estado==='sinCargar')return`<div class="cm-dia-raro" style="left:${pct(centro(x.i))}%">Sin cargar</div>`;
+    if(x.estado==='parcial'&&!rotulos[x.i])return`<div class="cm-dia-parcial" style="left:${pct(centro(x.i))}%;top:${pct(Y(x.v))}%">parcial</div>`;
+    return'';
+  }).join('');
+
+  const ejeY=ticks.map(t=>`<span style="top:${pct(Y(t))}%">${fmtEje(t)}</span>`).join('');
+  const cada=Math.max(1,Math.ceil(n/10));
+  const ejeX=datos.map((x,i)=>(i%cada===0||i===n-1)?`<span style="left:${pct(centro(i))}%">${formatDateShortAR(x.d.date)}</span>`:'').join('');
+  const promTxt=promedio>0?`<div class="cm-prom-label" style="top:${pct(Y(promedio))}%">${etiquetaProm}</div>`:'';
+
+  return`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${grilla}${lineaProm}${barras}${marcasObj}</svg>${promTxt}${marcasDia}${callouts}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+}
+
+// Tooltip del módulo: el día bajo el cursor según la posición horizontal — sirve cualquier punto de
+// la franja de ese día, no hace falta apuntarle a la barra (un día sin cargar no tiene barra).
+function engancharTooltipModulo(container,datos,contenido){
+  const plot=container.querySelector('.cm-plot'),tip=container.querySelector('.cm-tooltip');
+  if(!plot||!tip)return;
+  const n=datos.length;let actual=-1;
+  const marcar=i=>{
+    if(i===actual)return;
+    plot.querySelectorAll('.cm-hover').forEach(el=>el.classList.remove('cm-hover'));
+    if(i>=0)plot.querySelectorAll(`[data-i="${i}"]`).forEach(el=>el.classList.add('cm-hover'));
+    actual=i;
+  };
+  const ocultar=()=>{tip.hidden=true;marcar(-1)};
+  const mover=evt=>{
+    const r=plot.getBoundingClientRect(),p=evt.touches?evt.touches[0]:evt;
+    if(!r.width)return ocultar();
+    const xr=(p.clientX-r.left)/r.width;
+    if(xr<0||xr>1)return ocultar();
+    const i=Math.min(n-1,Math.floor(xr*n));
+    marcar(i);
+    tip.innerHTML=contenido(datos[i]);
+    tip.hidden=false;
+    tip.style.left=`${Math.min(88,Math.max(12,(i+.5)/n*100))}%`;
+  };
+  plot.addEventListener('mousemove',mover);
+  plot.addEventListener('mouseleave',ocultar);
+  plot.addEventListener('touchmove',mover,{passive:true});
+  plot.addEventListener('touchend',ocultar);
+}
+
+// Leyenda + qué días están marcados y por qué. Los días raros se nombran acá con fecha: el gráfico
+// los señala, pero la explicación tiene que poder leerse sin pasar el cursor.
+function pieModulo(claves,datos,cargadosDe){
+  const leyenda=claves.map(([cls,txt])=>`<span class="cm-key"><i class="${cls}"></i>${txt}</span>`).join('');
+  const raros=datos.filter(x=>x.estado!=='ok').map(x=>{
+    const f=formatDateShortAR(x.d.date);
+    if(x.estado==='cerrado')return`${f} cerrado`;
+    if(x.estado==='sinCargar')return`${f} sin cargar`;
+    return`${f} parcial (${cargadosDe(x.d)} de ${x.d.esperados} locales)`;
+  });
+  return leyenda+(raros.length?`<span class="cm-foot-raros">${raros.join(' · ')}</span>`:'');
+}
+
+// ── 05 · Tráfico ──
+function renderStoreTrafficModule(container,daily){
+  const datos=daily.map(d=>({d,v:d.traffic,obj:d.trafficTarget,estado:estadoDelDia(d,d.conTrafico,d.traffic)}));
+  if(!datos.some(x=>x.v>0)){container.className='empty-state';container.innerHTML='No hay tráfico cargado para estos filtros.';return}
+  const completos=datos.filter(x=>x.estado==='ok'&&x.v>0);
+
+  const total=datos.reduce((s,x)=>s+x.v,0);
+  const diasConDato=datos.filter(x=>x.v>0).length;
+  // Promedio y objetivo diario SOLO sobre días completos: un día parcial o sin cargar bajaría el
+  // promedio por un faltante de carga, no porque haya venido menos gente.
+  const promedio=completos.length?completos.reduce((s,x)=>s+x.v,0)/completos.length:0;
+  const conObj=completos.filter(x=>x.obj>0);
+  const promObj=conObj.length?conObj.reduce((s,x)=>s+x.obj,0)/conObj.length:0;
+  const desvioProm=promObj?(promedio/promObj-1)*100:null;
+  const pico=completos.length?completos.reduce((a,b)=>b.v>a.v?b:a):null;
+  // Contra el objetivo SOLO de los locales que cargaron tráfico (trafficTargetConDato). Es el mismo
+  // número que la tarjeta 05 de arriba, que se calcula igual — ver renderStoreKpiGrid.
+  const objConDato=daily.reduce((s,d)=>s+(d.trafficTargetConDato||0),0);
+  const cumpl=objConDato?total/objConDato:null;
+  const tono=r=>r===null?'':r>=1?'good':r>=.9?'warning':'bad';
+
+  const stats=[
+    {label:'Personas en el período',value:number(total),
+      sub:`${diasConDato} día${diasConDato===1?'':'s'} con tráfico cargado`},
+    {label:'Promedio por día',value:`${number(Math.round(promedio))}<small>pers./día</small>`,
+      sub:promObj?`objetivo ${number(Math.round(promObj))}/día · <b class="${desvioProm>=0?'good':'bad'}">${desvioProm>=0?'+':''}${percent(desvioProm)}</b>`:'sin objetivo de tráfico cargado'},
+    {label:'Día de mayor tráfico',value:pico?`${number(pico.v)}<small>pers.</small>`:'—',
+      sub:pico?`${diaCortoDe(pico.d.date)} ${formatDateShortAR(pico.d.date)}`:''},
+    {label:'Vs. objetivo de tráfico',value:cumpl!==null?percent(cumpl*100):'—',tone:tono(cumpl),
+      sub:cumpl!==null?`${number(total)} de ${number(Math.round(objConDato))} personas necesarias`:'sin objetivo de tráfico cargado'}
+  ];
+
+  const grafico=barrasDiariasHtml({datos,fmt:v=>number(v),fmtEje:v=>number(v),promedio,etiquetaProm:`promedio ${number(Math.round(promedio))}/día`});
+  const pie=pieModulo([['cm-key-bar','Personas por día'],['cm-key-obj','Objetivo del día'],['cm-key-prom','Promedio de los días completos']],datos,d=>d.conTrafico);
+  container.className='';
+  container.innerHTML=moduloAnalisisHtml(stats,grafico,pie);
+  engancharTooltipModulo(container,datos,x=>{
+    const f=`<div class="chart-tooltip-date">${diaCortoDe(x.d.date)} ${formatDateAR(x.d.date)}</div>`;
+    const fila=(color,txt,val)=>`<div class="chart-tooltip-row">${color?`<i style="background:${color}"></i>`:''}<span>${txt}</span>${val!==undefined?`<strong>${val}</strong>`:''}</div>`;
+    if(x.estado==='cerrado')return f+fila('','Cerrado — sin objetivo ese día');
+    if(x.estado==='sinCargar')return f+fila('','Todavía sin cargar')+(x.obj?fila('var(--white)','Objetivo',`${number(x.obj)} pers.`):'');
+    const r=x.obj?x.v/x.obj:null;
+    return f+fila('var(--amber)','Personas',number(x.v))+
+      (x.obj?fila('var(--white)','Objetivo',number(x.obj))+fila('','Cumplimiento',`<span class="${r>=1?'good':'bad'}">${percent(r*100)}</span>`):'')+
+      (x.estado==='parcial'?fila('',`Parcial: cargaron ${x.d.conTrafico} de ${x.d.esperados} locales`):'');
+  });
+}
+
 function renderStoreChart(daily,ctx){
   const meta=STORE_KPI_META[state.storeMetric];
   $('storeChartKicker').textContent=meta.kicker;
@@ -2409,7 +2629,7 @@ function renderStoreChart(daily,ctx){
   if(state.storeMetric==='proyeccion')return renderStoreProjectionChart(area,daily,ctx);
   if(state.storeMetric==='conversion')return renderStoreLineChart(area,daily,'conversion',percent,'var(--mint)');
   if(state.storeMetric==='ticket')return renderStoreLineChart(area,daily,'ticket',money,'var(--coral)');
-  if(state.storeMetric==='trafico')return renderStoreLineChart(area,daily,'traffic',number,'var(--amber)');
+  if(state.storeMetric==='trafico')return renderStoreTrafficModule(area,daily);
 }
 // Card 01 — mismo lenguaje visual que "Día a día" del Resumen General (barras agrupadas
 // semáforo + roundedTopBarPath), reusado tal cual acá para no duplicar el estilo.
