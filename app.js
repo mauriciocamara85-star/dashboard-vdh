@@ -2216,7 +2216,9 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   renderDiagnosisPanel('storeDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderStoreFocus(rows);
   renderStoreBreakdown(rows);
-  const columns=[['Fecha','Fecha'],['Local','Local'],['Día','Día'],['Objetivo','Objetivo'],['Venta real','Venta real'],['Desvío','__delta'],['Tráfico','Tráfico real'],['Conversión','Conversión'],['Ticket','Ticket prom.']];renderTable('storeTable',rows,columns,row=>({...row,__delta:num(row,'Venta real')-num(row,'Objetivo')}),4);$('storeRowsCount').textContent=`${rows.length} días`}
+  // __deltaPct queda en null cuando la fila no tiene objetivo cargado: dividir por cero daría
+  // Infinity y un día sin objetivo no tiene desvío porcentual que mostrar (sale como "—").
+  const columns=[['Fecha','Fecha'],['Local','Local'],['Día','Día'],['Objetivo','Objetivo'],['Venta real','Venta real'],['Desvío','__delta'],['Desvío %','__deltaPct'],['Tráfico','Tráfico real'],['Conversión','Conversión'],['Ticket','Ticket prom.']];renderTable('storeTable',rows,columns,row=>{const obj=num(row,'Objetivo'),delta=num(row,'Venta real')-obj;return{...row,__delta:delta,__deltaPct:obj?delta/obj*100:null}},4);$('storeRowsCount').textContent=`${rows.length} días`}
 
 // ── Cabecera de "Locales": 6 tarjetas selectoras + gráfico dinámico ──────────
 // Proyección de cierre de UNA sola entidad (un local, o un canal) — monthRows tiene que venir ya
@@ -2620,7 +2622,7 @@ function renderTable(id,rows,columns,transform){
   // a TODO menos "Desvío" por default, así que Fecha/Local/Día salían con el mismo blanco+Space
   // Grotesk que un número — y de paso, al alinear los números a la derecha (pedido 2026-09-08), esas
   // columnas de texto se hubieran ido a la derecha también si no se corregía este default acá.
-  const isNumericLabel=label=>['Objetivo','Venta real','Ticket','Desvío','Conversión','Tráfico','Visitas','Q ventas'].includes(label);
+  const isNumericLabel=label=>['Objetivo','Venta real','Ticket','Desvío','Desvío %','Conversión','Tráfico','Visitas','Q ventas'].includes(label);
   table.innerHTML=`<thead><tr>${columns.map(([label,key])=>{const active=sortActive&&state.sort.key===key;return `<th data-sort="${key}" data-table="${id}" tabindex="0" aria-sort="${active?(state.sort.direction>0?'ascending':'descending'):'none'}"${isNumericLabel(label)?' class="align-right"':''}>${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`}).join('')}</tr></thead><tbody>${data.slice(0,120).map(row=>`<tr>${columns.map(([label,key])=>{
     const value=row[key];
     const isMoney=['Objetivo','Venta real','Ticket','Desvío'].includes(label);
@@ -2632,15 +2634,17 @@ function renderTable(id,rows,columns,transform){
     // Fecha siempre en formato argentino día/mes/año (formatDateAR) — el valor crudo que llega del
     // Sheet ya es ISO (ver normalizeDate), nunca se muestra así directo (pedido 2026-09-13).
     const isDate=label==='Fecha';
-    // "num" va SIEMPRE junto al tono en Desvío (no uno u otro) — mismo patrón que ya usan
-    // seasonMonthTable/renderStoreProjectionChart para sus propias columnas de desvío; sin las dos
-    // clases juntas, Desvío se quedaba sin el blanco+alineación a la derecha del resto de números.
-    const cls=label==='Desvío'?`num ${value>=0?'positive':'negative'}`:isNumericLabel(label)?'num':'';
-    // Desvío también en % (no solo en $) — mismo pedido de arriba: se calcula contra "Objetivo" de
-    // esta misma fila (el valor crudo sigue en `row`, el transform de storeTable solo AGREGA
-    // __delta, no reemplaza el resto de columnas).
-    const deltaPct=label==='Desvío'&&row['Objetivo']?value/row['Objetivo']*100:null;
-    return `<td class="${cls}">${isMoney?`${money(value)}${deltaPct!==null?` (${deltaPct>=0?'+':''}${percent(deltaPct)})`:''}`:isPct?percent(value*100):isCount?number(value):isDate?formatDateAR(value):escapeHtml(value??'—')}</td>`;
+    // El desvío en % va en su PROPIA columna, no entre paréntesis dentro de la de pesos (pedido
+    // 2026-10-01): metidos en la misma celda, el monto y el porcentaje no se podían ordenar por
+    // separado ni leer en vertical. Llega ya en puntos de porcentaje —no en fracción como
+    // Conversión— y puede venir null cuando la fila no tiene objetivo: ahí no hay porcentaje posible.
+    const isDeltaPct=label==='Desvío %';
+    const sinValor=value===null||value===undefined;
+    // "num" va SIEMPRE junto al tono en las dos columnas de desvío (no uno u otro) — mismo patrón
+    // que ya usan seasonMonthTable/renderStoreProjectionChart para las suyas; sin las dos clases
+    // juntas se quedaban sin el blanco+alineación a la derecha del resto de números.
+    const cls=(label==='Desvío'||isDeltaPct)?(sinValor?'num':`num ${value>=0?'positive':'negative'}`):isNumericLabel(label)?'num':'';
+    return `<td class="${cls}">${isDeltaPct?(sinValor?'—':`${value>=0?'+':''}${percent(value)}`):isMoney?money(value):isPct?percent(value*100):isCount?number(value):isDate?formatDateAR(value):escapeHtml(value??'—')}</td>`;
   }).join('')}</tr>`).join('')||`<tr><td colspan="${columns.length}" class="empty-state">Sin datos para estos filtros</td></tr>`}</tbody>`;
   attachSortHeaders(id);
 }
