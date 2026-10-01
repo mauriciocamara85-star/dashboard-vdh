@@ -256,12 +256,25 @@ function aplicar(hoja, celda, formulaActual, formulaNueva, log, cuenta, mes) {
 
 // Recorre los 14 locales × 6 meses llamando a 'porMes', con el corte de tiempo y el log armados
 // una sola vez para las dos correcciones.
+//
+// RETOMA DONDE QUEDÓ. La corrida real escribe 1.764 celdas y puede pasarse de los 4,5 minutos. Sin
+// esto, el corte frenaría SIEMPRE en el mismo local y los últimos no se corregirían nunca, por más
+// veces que se corra. Ahora guarda en qué local quedó (Propiedades del script) y la próxima corrida
+// arranca de ahí; al terminar los 14, borra la marca sola. Volver a escribir una fórmula que ya
+// está bien no hace daño, así que repetir una corrida es inofensivo.
 function recorrerYCorregir(etiqueta, porMes) {
   var t0 = new Date(), cuenta = { tocadas: 0, saltadas: 0 }, log = [], corto = '';
+  var props = PropertiesService.getScriptProperties();
+  var clave = 'PROGRESO_' + etiqueta.replace(/\W+/g, '_').toUpperCase();
+  var desde = MODO_PRUEBA ? 0 : Number(props.getProperty(clave) || 0);
+
   log.push('═══ CORRECCIÓN · ' + etiqueta + ' ═══',
            MODO_PRUEBA ? '*** MODO PRUEBA: no se escribe nada ***' : '*** ESCRIBIENDO DE VERDAD ***', '');
-  for (var L = 0; L < LOCALES.length; L++) {
-    if (new Date() - t0 > LIMITE_MS) { corto = 'CORTADO por tiempo en el local ' + (L + 1) + ' de ' + LOCALES.length; break; }
+  if (desde > 0) log.push('Retomando desde el local ' + (desde + 1) + ' (' + LOCALES[desde].nombre + ')', '');
+
+  var L = desde;
+  for (; L < LOCALES.length; L++) {
+    if (new Date() - t0 > LIMITE_MS) { corto = 'CORTADO por tiempo antes del local ' + (L + 1) + ' de ' + LOCALES.length; break; }
     try {
       var ss = SpreadsheetApp.openById(LOCALES[L].id);
       for (var m = 0; m < MESES.length; m++) porMes(ss, MESES[m], log, cuenta);
@@ -269,10 +282,24 @@ function recorrerYCorregir(etiqueta, porMes) {
       log.push('  ERROR en ' + LOCALES[L].nombre + ': ' + e.message);
     }
   }
-  if (corto) log.push('', '⚠ ' + corto);
-  log.push('', 'Celdas ' + (MODO_PRUEBA ? 'que se corregirían' : 'corregidas') + ': ' + cuenta.tocadas);
+
+  if (!MODO_PRUEBA) {
+    if (L < LOCALES.length) props.setProperty(clave, String(L));
+    else props.deleteProperty(clave);
+  }
+  if (corto) log.push('', '⚠ ' + corto, 'Volvé a correr la MISMA función: arranca sola desde ahí.');
+  log.push('', 'Celdas ' + (MODO_PRUEBA ? 'que se corregirían' : 'corregidas en esta corrida') + ': ' + cuenta.tocadas);
   log.push('Salteadas por no tener fórmula hoy: ' + cuenta.saltadas);
+  log.push('Locales completados: ' + L + ' de ' + LOCALES.length);
   log.push('Tiempo: ' + ((new Date() - t0) / 1000).toFixed(0) + ' s');
   if (MODO_PRUEBA) log.push('', 'Para aplicarlo de verdad: MODO_PRUEBA = false arriba y volver a correr.');
+  else if (L >= LOCALES.length) log.push('', '✔ TERMINADO, los 14 locales.');
   Logger.log(log.join('\n'));
+}
+
+// Por si hiciera falta volver a empezar de cero una corrección a mitad de camino.
+function reiniciarProgreso() {
+  PropertiesService.getScriptProperties().deleteProperty('PROGRESO_INFORME_VENDEDOR');
+  PropertiesService.getScriptProperties().deleteProperty('PROGRESO_TRAFICO');
+  Logger.log('Progreso borrado: las dos correcciones vuelven a arrancar desde el primer local.');
 }
