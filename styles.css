@@ -959,6 +959,25 @@ html[data-theme="light"] .store-kpi-card.active .store-kpi-label{color:#B45309}
 .cm-key i.cm-key-obj{height:3px;background:var(--white)}
 .cm-key i.cm-key-prom{height:0;border-top:1.5px dashed var(--muted);border-radius:0}
 .cm-foot-raros{margin-left:auto}
+
+/* Gráficos de LÍNEA del módulo (conversión, ticket — ver lineaDiariaHtml). El color de cada métrica
+   lo pone app.js en .cm-plot (style="color:…") y todo lo de la serie lo toma con currentColor: la
+   línea, el degradé del área y los puntos. */
+.cm-linea{fill:none;stroke:currentColor;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.cm-area{stroke:none}
+.cm-obj-linea{stroke:var(--white);stroke-width:1.5;stroke-dasharray:7 5;vector-effect:non-scaling-stroke;opacity:.75}
+.cm-ref-label{position:absolute;transform:translateY(-125%);font-size:10px;padding:1px 6px;border-radius:4px;background:var(--card);white-space:nowrap;pointer-events:none;z-index:1}
+.cm-ref-der{right:0;color:var(--white)}
+.cm-ref-izq{left:0;color:var(--muted)}
+.cm-punto{position:absolute;width:10px;height:10px;border-radius:50%;background:currentColor;border:2px solid var(--card);transform:translate(-50%,-50%);pointer-events:none;z-index:1}
+/* Parcial: anillo hueco y suelto, fuera de la línea — el valor está sesgado por un faltante de carga. */
+.cm-punto-parcial{background:var(--card);border-color:currentColor}
+.cm-punto-hover{width:12px;height:12px;z-index:2}
+.cm-guia{position:absolute;top:0;bottom:0;width:1px;background:var(--muted);opacity:.45;transform:translateX(-50%);pointer-events:none}
+/* El .cm-plot de las líneas tiene el color de la métrica: el tooltip no lo tiene que heredar. */
+.cm-tooltip{color:var(--white)}
+.cm-key i.cm-key-linea{height:3px}
+.cm-key i.cm-key-objlinea{height:0;border-top:1.5px dashed var(--white);border-radius:0}
 @media(max-width:900px){.cm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cm-foot-raros{margin-left:0}}
 @media(max-width:900px){.store-kpi-grid{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)}}
 @media(max-width:560px){.store-kpi-grid{grid-template-columns:1fr;grid-template-rows:none}}

@@ -2294,7 +2294,7 @@ function storeDailySeries(rows){
   rows.forEach(row=>{
     const date=normalizeDate(row.Fecha);
     if(!date)return;
-    if(!byDate[date])byDate[date]={actual:0,target:0,traffic:0,trafficTarget:0,trafficTargetConDato:0,esperados:0,conTrafico:0,conVenta:0,pond:nuevoPonderado(),cash:0,card:0,discount:0,payCount:0};
+    if(!byDate[date])byDate[date]={actual:0,target:0,traffic:0,trafficTarget:0,trafficTargetConDato:0,esperados:0,conTrafico:0,conVenta:0,conAmbos:0,pond:nuevoPonderado(),cash:0,card:0,discount:0,payCount:0};
     const d=byDate[date];
     const venta=num(row,'Venta real'),objetivo=num(row,'Objetivo'),trafico=num(row,'Tráfico real'),traficoObj=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
     d.actual+=venta;
@@ -2305,7 +2305,11 @@ function storeDailySeries(rows){
     // Con eso los gráficos distinguen un día cerrado, uno sin cargar y uno a medio cargar de una
     // caída real — ver estadoDelDia(). Van por separado porque el tráfico se carga aparte de la
     // venta: el 30/09 Rivadavia y Villa del Parque cargaron una y no el otro.
-    if(objetivo>0){d.esperados++;if(trafico>0)d.conTrafico++;if(venta>0)d.conVenta++}
+    // conAmbos es el "cargado" de la conversión, que necesita las dos cosas: un local que cargó
+    // venta y no tráfico mete tickets sin su gente (la empuja para arriba) y uno con tráfico y sin
+    // venta, gente sin tickets (para abajo). El 30/09 faltaron tres y de las dos maneras: dio 49,5%
+    // contra 62,9% del período. Sesgada, en cualquier dirección.
+    if(objetivo>0){d.esperados++;if(trafico>0)d.conTrafico++;if(venta>0)d.conVenta++;if(venta>0&&trafico>0)d.conAmbos++}
     // El objetivo de tráfico SOLO de los locales que cargaron tráfico: comparar la gente que vino
     // contra lo que se necesitaba en un local que no informó cuenta su faltante de carga como si
     // hubiera ido menos gente.
@@ -2317,7 +2321,11 @@ function storeDailySeries(rows){
     const d=byDate[date];
     return{
       date,actual:d.actual,target:d.target,traffic:d.traffic,trafficTarget:d.trafficTarget,
-      trafficTargetConDato:d.trafficTargetConDato,esperados:d.esperados,conTrafico:d.conTrafico,conVenta:d.conVenta,
+      trafficTargetConDato:d.trafficTargetConDato,esperados:d.esperados,conTrafico:d.conTrafico,conVenta:d.conVenta,conAmbos:d.conAmbos,
+      // Tickets del día y la venta que los respalda (la de filas con ticket válido, ver
+      // sumarPonderado): sumados sobre el período reproducen exactamente la conversión y el ticket
+      // ponderados de las tarjetas 03 y 04.
+      tickets:cerrarPonderado(d.pond).tickets,ventaConTicket:cerrarPonderado(d.pond).ticket*cerrarPonderado(d.pond).tickets,
       // La conversión del día se calcula contra el tráfico de ESE día (sumarPonderado se llama
       // con tráfico 0 porque el tráfico ya viene acumulado aparte, en d.traffic).
       conversion:d.traffic?cerrarPonderado(d.pond).tickets/d.traffic*100:null,
@@ -2406,7 +2414,9 @@ function renderStoreKpiGrid(ctx,daily){
   }
 
   $('storeKpiValue-conversion').textContent=percent(avgConv*100);
-  $('storeKpiSub-conversion').textContent=hasConvObj?`${brechaConv>=0?'+':''}${percent(brechaConv*100)} vs. objetivo`:'promedio del período';
+  // brechaConv es una resta de dos tasas, así que son PUNTOS: decía "+10,8% vs. objetivo", que se
+  // lee como un 10,8% relativo. El módulo de abajo dice "pts" y tienen que decir lo mismo.
+  $('storeKpiSub-conversion').textContent=hasConvObj?`${brechaConv>=0?'+':''}${(brechaConv*100).toFixed(1).replace('.',',')} pts vs. objetivo`:'promedio del período';
 
   $('storeKpiValue-ticket').textContent=money(avgTicket);
   $('storeKpiSub-ticket').textContent=hasTicketObj?`objetivo ${money(avgTicketObj)}`:'venta promedio por compra';
@@ -2485,9 +2495,8 @@ function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
   const Y=v=>1000-(v/tope)*1000;
   const banda=1000/n,ancho=Math.min(banda*.62,48);
   const X=i=>i*banda+(banda-ancho)/2,centro=i=>(i+.5)*banda;
-  const pct=v=>(v/10).toFixed(2);   // milésimas del SVG → % para el HTML de encima
+  const posX=i=>(centro(i)/10).toFixed(2),posY=v=>(Y(v)/10).toFixed(2);   // milésimas del SVG → %
 
-  const grilla=ticks.map(t=>`<line class="cm-grid" x1="0" x2="1000" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"></line>`).join('');
   const barras=datos.map((x,i)=>{
     if(x.estado==='cerrado')return'';
     // Lo que falta cargar va como silueta punteada hasta el objetivo del día: se lee "acá había que
@@ -2496,11 +2505,67 @@ function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
     return`<rect class="cm-bar${x.estado==='parcial'?' cm-bar-parcial':''}" data-i="${i}" x="${X(i).toFixed(1)}" y="${Y(x.v).toFixed(1)}" width="${ancho.toFixed(1)}" height="${(1000-Y(x.v)).toFixed(1)}"></rect>`;
   }).join('');
   const marcasObj=datos.map((x,i)=>(x.obj>0&&(x.estado==='ok'||x.estado==='parcial'))?`<line class="cm-obj" x1="${(X(i)-banda*.08).toFixed(1)}" x2="${(X(i)+ancho+banda*.08).toFixed(1)}" y1="${Y(x.obj).toFixed(1)}" y2="${Y(x.obj).toFixed(1)}"></line>`:'').join('');
-  const lineaProm=promedio>0?`<line class="cm-prom" x1="0" x2="1000" y1="${Y(promedio).toFixed(1)}" y2="${Y(promedio).toFixed(1)}"></line>`:'';
 
-  // Rótulos: pico y mínimo entre los días completos, más el último día con dato. Si dos caen en el
-  // mismo día se dice una sola vez con los motivos juntos — y si ese día es parcial, el rótulo lo
-  // avisa en vez de poner una segunda etiqueta encima de la misma barra.
+  const rotulos=rotulosDelModulo(datos);
+  const{ejeY,ejeX}=ejesHtml(ticks,fmtEje,datos,posX,posY);
+  const promTxt=promedio>0?`<div class="cm-prom-label" style="top:${posY(promedio)}%">${etiquetaProm}</div>`:'';
+  return`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${grillaSvg(ticks,Y)}${promedio>0?lineaHorizontalSvg('cm-prom',Y(promedio)):''}${barras}${marcasObj}</svg>${promTxt}${marcasDiaHtml(datos,rotulos,posX,posY)}${calloutsHtml(rotulos,fmt,posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+}
+
+// Línea diaria para los indicadores que son una TASA (conversión, ticket): sumar días no tiene
+// sentido, así que en vez de barras va una línea. Mismas piezas que las barras —escala, fechas,
+// rótulos, días raros—, con tres diferencias:
+//   · La línea une solo días completos y se corta en los demás. Un día parcial queda como anillo
+//     suelto, porque su valor está sesgado (la conversión del 30/09 cuenta tickets de locales que
+//     no cargaron su gente y gente de uno que no cargó sus ventas), y uno cerrado o sin cargar deja
+//     el hueco.
+//   · Dos referencias horizontales: el objetivo (blanco punteado, rótulo a la derecha) y el valor
+//     del período (gris, rótulo a la izquierda). Son los dos números de las tarjetas, así que
+//     "venimos arriba / abajo del objetivo" sale del gráfico sin hacer cuentas.
+//   · Sin puntos permanentes en cada día: solo los rotulados, los parciales y los días sueltos; el
+//     del día bajo el cursor aparece al pasar. Son HTML porque un círculo en el SVG estirado sale
+//     ovalado.
+// Devuelve {html,posY}: posY lo usa el tooltip para ubicar el punto del día bajo el cursor.
+function lineaDiariaHtml({datos,fmt,fmtEje,objetivo,etiquetaObj,referencia,etiquetaRef,color,gradId}){
+  const n=datos.length;
+  const visibles=datos.filter(x=>x.v>0&&(x.estado==='ok'||x.estado==='parcial')).map(x=>x.v);
+  const{ticks,tope}=escalaRedonda(Math.max(1,...visibles,objetivo||0,referencia||0));
+  const Y=v=>1000-(v/tope)*1000,banda=1000/n,centro=i=>(i+.5)*banda;
+  const posX=i=>(centro(i)/10).toFixed(2),posY=v=>(Y(v)/10).toFixed(2);
+
+  const tramos=[];let tramo=[];
+  datos.forEach((x,i)=>{if(x.estado==='ok'&&x.v>0)tramo.push(i);else if(tramo.length){tramos.push(tramo);tramo=[]}});
+  if(tramo.length)tramos.push(tramo);
+  const trazo=t=>t.map((i,k)=>`${k?'L':'M'}${centro(i).toFixed(1)} ${Y(datos[i].v).toFixed(1)}`).join(' ');
+  const largos=tramos.filter(t=>t.length>1);
+  const areas=largos.map(t=>`<path class="cm-area" fill="url(#${gradId})" d="${trazo(t)} L${centro(t[t.length-1]).toFixed(1)} 1000 L${centro(t[0]).toFixed(1)} 1000 Z"></path>`).join('');
+  const lineas=largos.map(t=>`<path class="cm-linea" d="${trazo(t)}"></path>`).join('');
+
+  const rotulos=rotulosDelModulo(datos);
+  const conPunto=new Set([
+    ...Object.keys(rotulos).map(Number),
+    ...tramos.filter(t=>t.length===1).map(t=>t[0]),
+    ...datos.map((x,i)=>x.estado==='parcial'&&x.v>0?i:-1).filter(i=>i>=0)
+  ]);
+  const puntos=[...conPunto].map(i=>`<div class="cm-punto${datos[i].estado==='parcial'?' cm-punto-parcial':''}" style="left:${posX(i)}%;top:${posY(datos[i].v)}%"></div>`).join('');
+
+  const refs=(objetivo>0?lineaHorizontalSvg('cm-obj-linea',Y(objetivo)):'')+(referencia>0?lineaHorizontalSvg('cm-prom',Y(referencia)):'');
+  const refsTxt=(objetivo>0?`<div class="cm-ref-label cm-ref-der" style="top:${posY(objetivo)}%">${etiquetaObj}</div>`:'')+
+    (referencia>0?`<div class="cm-ref-label cm-ref-izq" style="top:${posY(referencia)}%">${etiquetaRef}</div>`:'');
+  const{ejeY,ejeX}=ejesHtml(ticks,fmtEje,datos,posX,posY);
+  const defs=`<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".28"></stop><stop offset="100%" stop-color="currentColor" stop-opacity="0"></stop></linearGradient></defs>`;
+  const html=`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot" style="color:${color}"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${defs}${grillaSvg(ticks,Y)}${refs}${areas}${lineas}</svg>${refsTxt}${marcasDiaHtml(datos,rotulos,posX,posY)}<div class="cm-guia" hidden></div>${puntos}<div class="cm-punto cm-punto-hover" hidden></div>${calloutsHtml(rotulos,fmt,posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+  return{html,posY:x=>(x.v>0&&(x.estado==='ok'||x.estado==='parcial'))?`${posY(x.v)}%`:null};
+}
+
+// ── Piezas que comparten las barras y las líneas ──
+// Trabajan sobre `datos` = [{d,v,obj,estado}] y dos funciones que devuelven la posición en %:
+// posX por índice de día y posY por valor.
+
+// Pico y mínimo entre los días completos, más el último día con dato. Si dos caen en el mismo día
+// se dicen juntos en un solo rótulo, y si ese día es parcial el rótulo lo avisa en vez de poner
+// una segunda etiqueta encima del mismo punto.
+function rotulosDelModulo(datos){
   const conIndice=datos.map((x,i)=>({...x,i}));
   const completos=conIndice.filter(x=>x.estado==='ok'&&x.v>0);
   const rotulos={};
@@ -2511,35 +2576,45 @@ function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
   }
   const conDato=conIndice.filter(x=>x.v>0);
   if(conDato.length)rotular(conDato[conDato.length-1],'último');
-  const callouts=Object.values(rotulos).map(({x,motivos})=>{
-    if(x.estado==='parcial')motivos.push('parcial');
+  Object.values(rotulos).forEach(r=>{if(r.x.estado==='parcial')r.motivos.push('parcial')});
+  return rotulos;
+}
+function calloutsHtml(rotulos,fmt,posX,posY){
+  return Object.values(rotulos).map(({x,motivos})=>{
     const cls=motivos.includes('pico')?' cm-callout-pico':motivos.includes('mín.')?' cm-callout-min':'';
-    return`<div class="cm-callout${cls}" style="left:${pct(centro(x.i))}%;top:${pct(Y(x.v))}%"><span>${motivos.join(' · ')}</span>${fmt(x.v)}</div>`;
+    return`<div class="cm-callout${cls}" style="left:${posX(x.i)}%;top:${posY(x.v)}%"><span>${motivos.join(' · ')}</span>${fmt(x.v)}</div>`;
   }).join('');
-
-  // Días raros: rótulo vertical dentro del hueco del día (cerrado / sin cargar) o arriba de la barra
-  // (parcial). Vertical porque con un mes entero cada día tiene ~40px de ancho y "Sin cargar" en
-  // horizontal pisaría a los vecinos — el 30/09 parcial y el 01/10 sin cargar son contiguos.
-  const marcasDia=conIndice.map(x=>{
-    if(x.estado==='cerrado')return`<div class="cm-dia-raro" style="left:${pct(centro(x.i))}%">Cerrado</div>`;
-    if(x.estado==='sinCargar')return`<div class="cm-dia-raro" style="left:${pct(centro(x.i))}%">Sin cargar</div>`;
-    if(x.estado==='parcial'&&!rotulos[x.i])return`<div class="cm-dia-parcial" style="left:${pct(centro(x.i))}%;top:${pct(Y(x.v))}%">parcial</div>`;
+}
+// Días raros: rótulo vertical dentro del hueco del día (cerrado / sin cargar) o arriba del dato
+// (parcial). Vertical porque con un mes entero cada día tiene ~40px de ancho y "Sin cargar" en
+// horizontal pisaría a los vecinos — el 30/09 parcial y el 01/10 sin cargar son contiguos.
+function marcasDiaHtml(datos,rotulos,posX,posY){
+  return datos.map((x,i)=>{
+    if(x.estado==='cerrado')return`<div class="cm-dia-raro" style="left:${posX(i)}%">Cerrado</div>`;
+    if(x.estado==='sinCargar')return`<div class="cm-dia-raro" style="left:${posX(i)}%">Sin cargar</div>`;
+    if(x.estado==='parcial'&&x.v>0&&!rotulos[i])return`<div class="cm-dia-parcial" style="left:${posX(i)}%;top:${posY(x.v)}%">parcial</div>`;
     return'';
   }).join('');
-
-  const ejeY=ticks.map(t=>`<span style="top:${pct(Y(t))}%">${fmtEje(t)}</span>`).join('');
-  const cada=Math.max(1,Math.ceil(n/10));
-  const ejeX=datos.map((x,i)=>(i%cada===0||i===n-1)?`<span style="left:${pct(centro(i))}%">${formatDateShortAR(x.d.date)}</span>`:'').join('');
-  const promTxt=promedio>0?`<div class="cm-prom-label" style="top:${pct(Y(promedio))}%">${etiquetaProm}</div>`:'';
-
-  return`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${grilla}${lineaProm}${barras}${marcasObj}</svg>${promTxt}${marcasDia}${callouts}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
 }
+// Eje Y con los cortes de la escala, eje X con ~10 fechas repartidas (siempre la última).
+function ejesHtml(ticks,fmtEje,datos,posX,posY){
+  const n=datos.length,cada=Math.max(1,Math.ceil(n/10));
+  return{
+    ejeY:ticks.map(t=>`<span style="top:${posY(t)}%">${fmtEje(t)}</span>`).join(''),
+    ejeX:datos.map((x,i)=>(i%cada===0||i===n-1)?`<span style="left:${posX(i)}%">${formatDateShortAR(x.d.date)}</span>`:'').join('')
+  };
+}
+const grillaSvg=(ticks,Y)=>ticks.map(t=>lineaHorizontalSvg('cm-grid',Y(t))).join('');
+const lineaHorizontalSvg=(cls,y)=>`<line class="${cls}" x1="0" x2="1000" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"></line>`;
 
 // Tooltip del módulo: el día bajo el cursor según la posición horizontal — sirve cualquier punto de
-// la franja de ese día, no hace falta apuntarle a la barra (un día sin cargar no tiene barra).
-function engancharTooltipModulo(container,datos,contenido){
+// la franja de ese día, no hace falta apuntarle a la barra (un día sin cargar no tiene barra). En
+// los gráficos de línea además corre una guía vertical y el punto del día; `posY` dice dónde va el
+// punto, o null si ese día no tiene valor que marcar.
+function engancharTooltipModulo(container,datos,contenido,posY){
   const plot=container.querySelector('.cm-plot'),tip=container.querySelector('.cm-tooltip');
   if(!plot||!tip)return;
+  const guia=plot.querySelector('.cm-guia'),punto=plot.querySelector('.cm-punto-hover');
   const n=datos.length;let actual=-1;
   const marcar=i=>{
     if(i===actual)return;
@@ -2547,7 +2622,7 @@ function engancharTooltipModulo(container,datos,contenido){
     if(i>=0)plot.querySelectorAll(`[data-i="${i}"]`).forEach(el=>el.classList.add('cm-hover'));
     actual=i;
   };
-  const ocultar=()=>{tip.hidden=true;marcar(-1)};
+  const ocultar=()=>{tip.hidden=true;marcar(-1);if(guia)guia.hidden=true;if(punto)punto.hidden=true};
   const mover=evt=>{
     const r=plot.getBoundingClientRect(),p=evt.touches?evt.touches[0]:evt;
     if(!r.width)return ocultar();
@@ -2555,6 +2630,9 @@ function engancharTooltipModulo(container,datos,contenido){
     if(xr<0||xr>1)return ocultar();
     const i=Math.min(n-1,Math.floor(xr*n));
     marcar(i);
+    const izq=`${((i+.5)/n*100).toFixed(2)}%`;
+    if(guia){guia.style.left=izq;guia.hidden=false}
+    if(punto){const top=posY?posY(datos[i]):null;punto.hidden=top===null;if(top!==null){punto.style.left=izq;punto.style.top=top}}
     tip.innerHTML=contenido(datos[i]);
     tip.hidden=false;
     tip.style.left=`${Math.min(88,Math.max(12,(i+.5)/n*100))}%`;
@@ -2566,16 +2644,110 @@ function engancharTooltipModulo(container,datos,contenido){
 }
 
 // Leyenda + qué días están marcados y por qué. Los días raros se nombran acá con fecha: el gráfico
-// los señala, pero la explicación tiene que poder leerse sin pasar el cursor.
-function pieModulo(claves,datos,cargadosDe){
-  const leyenda=claves.map(([cls,txt])=>`<span class="cm-key"><i class="${cls}"></i>${txt}</span>`).join('');
+// los señala, pero la explicación tiene que poder leerse sin pasar el cursor. Cada clave es
+// [clase, texto, estilo opcional] — el estilo es para el color de la línea de cada métrica.
+function pieModulo(claves,datos,cargadosDe,queCargaron='locales'){
+  const leyenda=claves.map(([cls,txt,estilo])=>`<span class="cm-key"><i class="${cls}"${estilo?` style="${estilo}"`:''}></i>${txt}</span>`).join('');
   const raros=datos.filter(x=>x.estado!=='ok').map(x=>{
     const f=formatDateShortAR(x.d.date);
     if(x.estado==='cerrado')return`${f} cerrado`;
     if(x.estado==='sinCargar')return`${f} sin cargar`;
-    return`${f} parcial (${cargadosDe(x.d)} de ${x.d.esperados} locales)`;
+    return`${f} parcial (${cargadosDe(x.d)} de ${x.d.esperados} ${queCargaron})`;
   });
   return leyenda+(raros.length?`<span class="cm-foot-raros">${raros.join(' · ')}</span>`:'');
+}
+const tipFecha=d=>`<div class="chart-tooltip-date">${diaCortoDe(d.date)} ${formatDateAR(d.date)}</div>`;
+const tipFila=(color,txt,val)=>`<div class="chart-tooltip-row">${color?`<i style="background:${color}"></i>`:''}<span>${txt}</span>${val!==undefined?`<strong>${val}</strong>`:''}</div>`;
+const fechaCorta=x=>`${diaCortoDe(x.d.date)} ${formatDateShortAR(x.d.date)}`;
+
+// ── 03 · Conversión ──
+function renderStoreConversionModule(container,daily,ctx){
+  // v en % (0-100), como storeDailySeries.conversion; un día sin tráfico no tiene conversión. El
+  // "cargado" es conAmbos: hace falta venta Y tráfico del mismo local.
+  const datos=daily.map(d=>({d,v:d.conversion,obj:0,estado:estadoDelDia(d,d.conAmbos,d.traffic)}));
+  if(!datos.some(x=>x.v>0)){container.className='empty-state';container.innerHTML='No hay conversión para estos filtros: hace falta venta y tráfico cargados el mismo día.';return}
+  const completos=datos.filter(x=>x.estado==='ok'&&x.v>0);
+
+  // Tickets ÷ personas de todo el período: el mismo ponderado de la tarjeta 03 (pondLocal en
+  // renderStores), así que los dos números coinciden.
+  const tickets=daily.reduce((s,d)=>s+(d.tickets||0),0),personas=daily.reduce((s,d)=>s+d.traffic,0);
+  const conv=personas?tickets/personas*100:0;
+  const obj=ctx.hasConvObj?ctx.avgConvObj*100:0;
+  const brecha=obj?conv-obj:null;
+  const mejor=completos.length?completos.reduce((a,b)=>b.v>a.v?b:a):null;
+  const peor=completos.length>1?completos.reduce((a,b)=>b.v<a.v?b:a):null;
+  // Diferencia en PUNTOS, no en %: de 52% a 63% son 11 puntos, que sería un 21% relativo.
+  const pts=v=>`${v>=0?'+':''}${v.toFixed(1).replace('.',',')} pts`;
+
+  const stats=[
+    {label:'Conversión del período',value:percent(conv),sub:`${number(Math.round(tickets))} tickets de ${number(personas)} personas`},
+    {label:'Vs. objetivo',value:brecha!==null?pts(brecha):'—',tone:brecha===null?'':brecha>=0?'good':'bad',
+      sub:obj?`objetivo ${percent(obj)}`:'sin objetivo de conversión cargado'},
+    {label:'Mejor día',value:mejor?percent(mejor.v):'—',tone:mejor&&obj&&mejor.v>=obj?'good':'',sub:mejor?fechaCorta(mejor):''},
+    {label:'Peor día',value:peor?percent(peor.v):'—',tone:peor&&obj&&peor.v<obj?'bad':'',sub:peor?fechaCorta(peor):''}
+  ];
+  const g=lineaDiariaHtml({datos,fmt:v=>percent(v),fmtEje:v=>`${number(v)}%`,objetivo:obj,etiquetaObj:`objetivo ${percent(obj)}`,
+    referencia:conv,etiquetaRef:`período ${percent(conv)}`,color:'var(--mint)',gradId:'cmGradConversion'});
+  const pie=pieModulo([['cm-key-linea','Conversión del día','background:var(--mint)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Conversión del período']],
+    datos,d=>d.conAmbos,'locales con venta y tráfico');
+  container.className='';
+  container.innerHTML=moduloAnalisisHtml(stats,g.html,pie);
+  engancharTooltipModulo(container,datos,x=>{
+    if(x.estado==='cerrado')return tipFecha(x.d)+tipFila('','Cerrado — sin objetivo ese día');
+    if(x.estado==='sinCargar')return tipFecha(x.d)+tipFila('','Sin venta y tráfico cargados');
+    return tipFecha(x.d)+tipFila('var(--mint)','Conversión',percent(x.v))+
+      tipFila('','Tickets',number(Math.round(x.d.tickets||0)))+tipFila('','Personas',number(x.d.traffic))+
+      (obj?tipFila('','Vs. objetivo',`<span class="${x.v>=obj?'good':'bad'}">${pts(x.v-obj)}</span>`):'')+
+      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conAmbos} de ${x.d.esperados} locales cargaron venta y tráfico`):'');
+  },g.posY);
+}
+
+// ── 04 · Ticket promedio ──
+function renderStoreTicketModule(container,daily,ctx){
+  const datos=daily.map(d=>({d,v:d.ticket,obj:0,estado:estadoDelDia(d,d.conVenta,d.actual)}));
+  if(!datos.some(x=>x.v>0)){container.className='empty-state';container.innerHTML='No hay ticket promedio para estos filtros.';return}
+  const completos=datos.filter(x=>x.estado==='ok'&&x.v>0);
+
+  // Venta ÷ tickets de todo el período: el mismo ponderado de la tarjeta 04.
+  const tickets=daily.reduce((s,d)=>s+(d.tickets||0),0),ventaT=daily.reduce((s,d)=>s+(d.ventaConTicket||0),0);
+  const ticket=tickets?ventaT/tickets:0;
+  const obj=ctx.hasTicketObj?ctx.avgTicketObj:0;
+  const brecha=obj?(ticket/obj-1)*100:null;
+  // Tendencia: los últimos N días completos contra los N anteriores, ponderado (venta ÷ tickets de
+  // esos días, no el promedio de los tickets diarios). N=7 si alcanza: una semana entera contra
+  // otra, así no se compara una tanda con sábados contra una sin. Con menos de 3 días por lado, no
+  // se compara.
+  const N=Math.min(7,Math.floor(completos.length/2));
+  const pond=xs=>{const t=xs.reduce((s,x)=>s+(x.d.tickets||0),0);return t?xs.reduce((s,x)=>s+(x.d.ventaConTicket||0),0)/t:0};
+  const reciente=N>=3?pond(completos.slice(-N)):0,anterior=N>=3?pond(completos.slice(-2*N,-N)):0;
+  const tendencia=anterior?(reciente/anterior-1)*100:null;
+  const mejor=completos.length?completos.reduce((a,b)=>b.v>a.v?b:a):null;
+  const peor=completos.length>1?completos.reduce((a,b)=>b.v<a.v?b:a):null;
+  const signo=v=>`${v>=0?'+':''}${percent(v)}`;
+
+  const stats=[
+    {label:'Ticket promedio',value:money(ticket),sub:`${money(ventaT)} en ${number(Math.round(tickets))} tickets`},
+    {label:'Vs. objetivo',value:brecha!==null?signo(brecha):'—',tone:brecha===null?'':brecha>=0?'good':'bad',
+      sub:obj?`objetivo ${money(obj)}`:'sin objetivo de ticket cargado'},
+    {label:'Tendencia reciente',value:tendencia!==null?signo(tendencia):'—',tone:tendencia===null?'':tendencia>=0?'good':'bad',
+      sub:tendencia!==null?`últimos ${N} días ${money(reciente)} vs. ${money(anterior)}`:'faltan días completos para comparar'},
+    {label:'Mejor día',value:mejor?money(mejor.v):'—',
+      sub:mejor?`${fechaCorta(mejor)}${peor?` · peor ${money(peor.v)} (${fechaCorta(peor)})`:''}`:''}
+  ];
+  const g=lineaDiariaHtml({datos,fmt:v=>money(v),fmtEje:v=>moneyShort(v),objetivo:obj,etiquetaObj:`objetivo ${money(obj)}`,
+    referencia:ticket,etiquetaRef:`período ${money(ticket)}`,color:'var(--coral)',gradId:'cmGradTicket'});
+  const pie=pieModulo([['cm-key-linea','Ticket del día','background:var(--coral)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Ticket del período']],
+    datos,d=>d.conVenta,'locales con venta');
+  container.className='';
+  container.innerHTML=moduloAnalisisHtml(stats,g.html,pie);
+  engancharTooltipModulo(container,datos,x=>{
+    if(x.estado==='cerrado')return tipFecha(x.d)+tipFila('','Cerrado — sin objetivo ese día');
+    if(x.estado==='sinCargar')return tipFecha(x.d)+tipFila('','Sin venta cargada');
+    return tipFecha(x.d)+tipFila('var(--coral)','Ticket',money(x.v))+
+      tipFila('','Tickets',number(Math.round(x.d.tickets||0)))+tipFila('','Venta',money(x.d.ventaConTicket||0))+
+      (obj?tipFila('','Vs. objetivo',`<span class="${x.v>=obj?'good':'bad'}">${signo((x.v/obj-1)*100)}</span>`):'')+
+      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conVenta} de ${x.d.esperados} locales cargaron venta`):'');
+  },g.posY);
 }
 
 // ── 05 · Tráfico ──
@@ -2636,8 +2808,8 @@ function renderStoreChart(daily,ctx){
   area.className='bar-chart';
   if(state.storeMetric==='venta')return renderStoreVentaChart(area,daily);
   if(state.storeMetric==='proyeccion')return renderStoreProjectionChart(area,daily,ctx);
-  if(state.storeMetric==='conversion')return renderStoreLineChart(area,daily,'conversion',percent,'var(--mint)');
-  if(state.storeMetric==='ticket')return renderStoreLineChart(area,daily,'ticket',money,'var(--coral)');
+  if(state.storeMetric==='conversion')return renderStoreConversionModule(area,daily,ctx);
+  if(state.storeMetric==='ticket')return renderStoreTicketModule(area,daily,ctx);
   if(state.storeMetric==='trafico')return renderStoreTrafficModule(area,daily);
 }
 // Card 01 — mismo lenguaje visual que "Día a día" del Resumen General (barras agrupadas
@@ -2708,23 +2880,6 @@ function renderStoreProjectionChart(container,daily,ctx){
   // de paso corrige que el color fijo anterior no cambiaba en modo claro. dasharray 6 6 pedido puntual
   // para esta tarjeta se aplica encima vía style inline (gana sobre el 4 4 de la clase).
   container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="areaGlowStore" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B00" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF6B00" stop-opacity="0"></stop></linearGradient></defs><path class="line-area" d="${areaPath}" style="fill:url(#areaGlowStore)"></path><line class="line-target" x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" style="stroke-dasharray:6 6"></line><text class="target-label" x="${w-4}" y="${targetLabelY}" text-anchor="end">Meta ${money(monthTarget)}</text><path class="line-actual" d="${linePath}"></path><path class="line-projection" d="${projPath}"></path><circle class="line-dot" cx="${x(lastDate).toFixed(1)}" cy="${y(last.cum).toFixed(1)}" r="4"><title>${money(last.cum)} al ${formatDateAR(lastDate)}</title></circle></svg><div class="line-axis"><span>${formatDateShortAR(firstDate)}</span><span>${desvio>=0?'+':''}${money(desvio)}${desvioPct!==null?` (${desvioPct>=0?'+':''}${percent(desvioPct)})`:''} proyectado vs. objetivo</span><span>${formatDateShortAR(endDate)}</span></div>${legend}`;
-}
-// Cards 03/04/05 — línea de evolución diaria de una sola métrica, mismas clases .line-* que ya
-// usa el gráfico del Resumen General (nada nuevo que mantener aparte).
-function renderStoreLineChart(container,daily,key,fmt,color){
-  const points=daily.filter(d=>d[key]!==null&&d[key]!==undefined);
-  if(!points.length){container.classList.add('empty-state');container.innerHTML='No hay valores cargados para esta métrica todavía.';return}
-  container.classList.remove('empty-state');
-  const w=760,h=190;
-  const maxVal=Math.max(...points.map(p=>p[key]),1);
-  const x=i=>points.length>1?(i/(points.length-1))*w:w/2;
-  const y=v=>h-(v/maxVal)*(h-10)-4;
-  const linePath=points.map((p,i)=>`${i===0?'M':'L'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ');
-  const areaPath=`${linePath} L${x(points.length-1).toFixed(1)},${h} L${x(0).toFixed(1)},${h} Z`;
-  const gradId=`areaGlow-${key}`;
-  const dots=points.map((p,i)=>`<circle class="line-dot" cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.5" style="fill:${color}"><title>${formatDateAR(p.date)}: ${fmt(p[key])}</title></circle>`).join('');
-  const first=points[0],last=points[points.length-1];
-  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style="stop-color:${color};stop-opacity:.25"></stop><stop offset="100%" style="stop-color:${color};stop-opacity:0"></stop></linearGradient></defs><path class="line-area" d="${areaPath}" style="fill:url(#${gradId})"></path><path class="line-actual" d="${linePath}" style="stroke:${color}"></path>${dots}</svg><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${fmt(last[key])} · último dato</span><span>${formatDateShortAR(last.date)}</span></div>`;
 }
 // Card 06 — layout master-detail (dona con el total adentro a la izquierda, tarjetas KPI + barra
 // de distribución ocupando todo el resto a la derecha). Efectivo/Tarjeta/Descuento son valores
