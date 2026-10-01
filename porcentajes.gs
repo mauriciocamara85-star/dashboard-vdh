@@ -31,18 +31,22 @@
     acomoda nada por su cuenta —repartir el punto que falta en otra celda
     sería cambiar un objetivo que nadie pidió cambiar— sino que AVISA, con el
     local, el mes y la semana, en el log y en un cartel al terminar.
-    Medido sobre TODOS los meses (504 grupos, 525 celdas con decimales)
-    quedaban 12 fuera de 100%; cuatro eran de septiembre, que ya no se toca.
-    Son dos problemas distintos, así que el aviso los separa:
+    De octubre en adelante son 420 grupos y 511 celdas con decimales, y quedan
+    8 fuera de 100% (medido el 2026-10-01). Son dos problemas distintos, así
+    que el aviso los separa:
 
       · YA NO SUMABAN 100 ANTES — los porcentajes cargados no reparten el mes
-        completo. Así se detectó: Caseros Septiembre daba 97% con 6 celdas, y
-        el redondeo no puede mover la suma 3 puntos (como máximo medio punto
-        por celda, y en empate Math.round va para arriba), así que ese 97 ya
-        estaba. Es el caso grave: hay objetivo del mes que no llegó a ninguna
-        semana.
-      · POR EL REDONDEO — sumaban 100 y quedaron en 99 o 101. Se ajusta un
-        punto a mano donde corresponda.
+        completo. Son 2, y ya estaban en números enteros: Rivadavia Octubre
+        Sem5 suma 98,00% y Lomas Sem3 99,00%. El script no les toca ninguna
+        celda —no tienen decimales— y ese aviso es la única señal de que hay
+        objetivo de la semana sin asignar a ningún día.
+      · POR EL REDONDEO — sumaban 100 y quedaron en 99 o 101. Son 6, todos
+        "semanas del mes", todos partiendo de 100,00% exacto. Se decide a qué
+        semana sacarle el punto que sobra.
+
+    Así se detectó la diferencia: Caseros Septiembre daba 97% con 6 celdas, y
+    el redondeo no puede mover la suma 3 puntos (como máximo medio punto por
+    celda, y en empate Math.round va para arriba), así que ese 97 ya estaba.
 
     Para poder distinguirlos, el aviso muestra siempre cuánto sumaba el grupo
     ANTES de redondear.
