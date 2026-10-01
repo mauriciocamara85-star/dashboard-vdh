@@ -2294,7 +2294,7 @@ function storeDailySeries(rows){
   rows.forEach(row=>{
     const date=normalizeDate(row.Fecha);
     if(!date)return;
-    if(!byDate[date])byDate[date]={actual:0,target:0,traffic:0,trafficTarget:0,trafficTargetConDato:0,esperados:0,conTrafico:0,conVenta:0,conAmbos:0,pond:nuevoPonderado(),cash:0,card:0,discount:0,payCount:0};
+    if(!byDate[date])byDate[date]={actual:0,target:0,traffic:0,trafficTarget:0,trafficTargetConDato:0,esperados:0,conTrafico:0,conVenta:0,conConversion:0,convPorTrafico:0,traficoConConversion:0,pond:nuevoPonderado(),cash:0,card:0,discount:0,payCount:0};
     const d=byDate[date];
     const venta=num(row,'Venta real'),objetivo=num(row,'Objetivo'),trafico=num(row,'Tráfico real'),traficoObj=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
     d.actual+=venta;
@@ -2305,11 +2305,16 @@ function storeDailySeries(rows){
     // Con eso los gráficos distinguen un día cerrado, uno sin cargar y uno a medio cargar de una
     // caída real — ver estadoDelDia(). Van por separado porque el tráfico se carga aparte de la
     // venta: el 30/09 Rivadavia y Villa del Parque cargaron una y no el otro.
-    // conAmbos es el "cargado" de la conversión, que necesita las dos cosas: un local que cargó
-    // venta y no tráfico mete tickets sin su gente (la empuja para arriba) y uno con tráfico y sin
-    // venta, gente sin tickets (para abajo). El 30/09 faltaron tres y de las dos maneras: dio 49,5%
-    // contra 62,9% del período. Sesgada, en cualquier dirección.
-    if(objetivo>0){d.esperados++;if(trafico>0)d.conTrafico++;if(venta>0)d.conVenta++;if(venta>0&&trafico>0)d.conAmbos++}
+    // La conversión de cada día es la que CARGÓ el local, tal cual (pedido 2026-10-01). Hasta acá se
+    // calculaba como venta ÷ ticket ÷ tráfico, y cuando esos tres datos no cerraban entre sí el
+    // gráfico contradecía a la planilla: Rivadavia 17/09 salía 105% con 63% cargado, por un ticket
+    // promedio mal tipeado. Si un dato está mal se ve en la auditoría de carga, no tapado ni
+    // corregido por una cuenta del dashboard.
+    // Con varios locales el día combina sus conversiones cargadas pesadas por su tráfico; con uno
+    // solo da exactamente lo cargado. conConversion = locales que cargaron conversión Y tráfico.
+    const conv=convRate(row,'Conversión');
+    if(conv>0&&trafico>0){d.convPorTrafico+=conv*trafico;d.traficoConConversion+=trafico}
+    if(objetivo>0){d.esperados++;if(trafico>0)d.conTrafico++;if(venta>0)d.conVenta++;if(conv>0&&trafico>0)d.conConversion++}
     // El objetivo de tráfico SOLO de los locales que cargaron tráfico: comparar la gente que vino
     // contra lo que se necesitaba en un local que no informó cuenta su faltante de carga como si
     // hubiera ido menos gente.
@@ -2321,14 +2326,15 @@ function storeDailySeries(rows){
     const d=byDate[date];
     return{
       date,actual:d.actual,target:d.target,traffic:d.traffic,trafficTarget:d.trafficTarget,
-      trafficTargetConDato:d.trafficTargetConDato,esperados:d.esperados,conTrafico:d.conTrafico,conVenta:d.conVenta,conAmbos:d.conAmbos,
+      trafficTargetConDato:d.trafficTargetConDato,esperados:d.esperados,conTrafico:d.conTrafico,conVenta:d.conVenta,conConversion:d.conConversion,
       // Tickets del día y la venta que los respalda (la de filas con ticket válido, ver
       // sumarPonderado): sumados sobre el período reproducen exactamente la conversión y el ticket
       // ponderados de las tarjetas 03 y 04.
       tickets:cerrarPonderado(d.pond).tickets,ventaConTicket:cerrarPonderado(d.pond).ticket*cerrarPonderado(d.pond).tickets,
-      // La conversión del día se calcula contra el tráfico de ESE día (sumarPonderado se llama
-      // con tráfico 0 porque el tráfico ya viene acumulado aparte, en d.traffic).
-      conversion:d.traffic?cerrarPonderado(d.pond).tickets/d.traffic*100:null,
+      // La cargada (ver arriba), en % 0-100.
+      conversion:d.traficoConConversion?d.convPorTrafico/d.traficoConConversion*100:null,
+      // El ticket ya sale del cargado: venta ÷ (venta ÷ ticket) es el ticket mismo para un local, y
+      // con varios es su promedio pesado por cantidad de tickets.
       ticket:cerrarPonderado(d.pond).ticket||null,
       cash:d.payCount?d.cash/d.payCount:0,card:d.payCount?d.card/d.payCount:0,discount:d.payCount?d.discount/d.payCount:0
     };
@@ -2663,8 +2669,8 @@ const fechaCorta=x=>`${diaCortoDe(x.d.date)} ${formatDateShortAR(x.d.date)}`;
 // ── 03 · Conversión ──
 function renderStoreConversionModule(container,daily,ctx){
   // v en % (0-100), como storeDailySeries.conversion; un día sin tráfico no tiene conversión. El
-  // "cargado" es conAmbos: hace falta venta Y tráfico del mismo local.
-  const datos=daily.map(d=>({d,v:d.conversion,obj:0,estado:estadoDelDia(d,d.conAmbos,d.traffic)}));
+  // "cargado" es conConversion: el local tiene que haber cargado conversión y tráfico.
+  const datos=daily.map(d=>({d,v:d.conversion,obj:0,estado:estadoDelDia(d,d.conConversion,d.traffic)}));
   if(!datos.some(x=>x.v>0)){container.className='empty-state';container.innerHTML='No hay conversión para estos filtros: hace falta venta y tráfico cargados el mismo día.';return}
   const completos=datos.filter(x=>x.estado==='ok'&&x.v>0);
 
@@ -2689,16 +2695,16 @@ function renderStoreConversionModule(container,daily,ctx){
   const g=lineaDiariaHtml({datos,fmt:v=>percent(v),fmtEje:v=>`${number(v)}%`,objetivo:obj,etiquetaObj:`objetivo ${percent(obj)}`,
     referencia:conv,etiquetaRef:`período ${percent(conv)}`,color:'var(--mint)',gradId:'cmGradConversion'});
   const pie=pieModulo([['cm-key-linea','Conversión del día','background:var(--mint)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Conversión del período']],
-    datos,d=>d.conAmbos,'locales con venta y tráfico');
+    datos,d=>d.conConversion,'locales con conversión y tráfico');
   container.className='';
   container.innerHTML=moduloAnalisisHtml(stats,g.html,pie);
   engancharTooltipModulo(container,datos,x=>{
     if(x.estado==='cerrado')return tipFecha(x.d)+tipFila('','Cerrado — sin objetivo ese día');
     if(x.estado==='sinCargar')return tipFecha(x.d)+tipFila('','Sin venta y tráfico cargados');
     return tipFecha(x.d)+tipFila('var(--mint)','Conversión',percent(x.v))+
-      tipFila('','Tickets',number(Math.round(x.d.tickets||0)))+tipFila('','Personas',number(x.d.traffic))+
+      tipFila('','Personas',number(x.d.traffic))+
       (obj?tipFila('','Vs. objetivo',`<span class="${x.v>=obj?'good':'bad'}">${pts(x.v-obj)}</span>`):'')+
-      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conAmbos} de ${x.d.esperados} locales cargaron venta y tráfico`):'');
+      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conConversion} de ${x.d.esperados} locales cargaron conversión y tráfico`):'');
   },g.posY);
 }
 
@@ -2744,7 +2750,7 @@ function renderStoreTicketModule(container,daily,ctx){
     if(x.estado==='cerrado')return tipFecha(x.d)+tipFila('','Cerrado — sin objetivo ese día');
     if(x.estado==='sinCargar')return tipFecha(x.d)+tipFila('','Sin venta cargada');
     return tipFecha(x.d)+tipFila('var(--coral)','Ticket',money(x.v))+
-      tipFila('','Tickets',number(Math.round(x.d.tickets||0)))+tipFila('','Venta',money(x.d.ventaConTicket||0))+
+      tipFila('','Venta',money(x.d.actual))+
       (obj?tipFila('','Vs. objetivo',`<span class="${x.v>=obj?'good':'bad'}">${signo((x.v/obj-1)*100)}</span>`):'')+
       (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conVenta} de ${x.d.esperados} locales cargaron venta`):'');
   },g.posY);
