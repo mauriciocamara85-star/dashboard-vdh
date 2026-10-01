@@ -27,7 +27,10 @@ const ICONS={
 };
 function icon(name,cls){return`<svg class="icon-svg${cls?` ${cls}`:''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]||''}</svg>`}
 function applyTheme(theme){const selected=theme==='light'?'light':'dark';document.documentElement.dataset.theme=selected;localStorage.setItem('vdh-theme',selected);qa('.theme-btn').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.themeChoice===selected)))}
-const tableNames=['LOCAL_DIARIO','VENDEDOR_DIARIO','VENDEDOR_SEMANAL','VENDEDOR_FOTOS','ECOM_DIARIO','ECOM_SEMANAL'];
+// Acá vivía `tableNames`, una lista fija de las seis tablas que nadie leía: loadData() hace
+// state.tables={...data} y toma lo que venga, y cada vista usa state.tables[x]||[]. Se sacó al
+// dejar de recibir VENDEDOR_FOTOS (v14 del consolidador), porque la lista decía que llegaban seis
+// y era mentira.
 // LOCAL_DIARIO_ANTERIOR es opcional y todavía no la manda el consolidador (ver README, sección
 // "Comparación contra el semestre anterior") — habilita sola la línea de semestre anterior del
 // gráfico de Resumen general apenas el endpoint la incluya, sin tocar este archivo.

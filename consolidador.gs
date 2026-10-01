@@ -121,6 +121,16 @@
     Las celdas que Sheets guarda como número nunca pasaron por ahí, así
     que el problema aparecía salteado, en los días sueltos que alguien
     pegó como texto. Ver conversación del 2026-09-30.
+
+    v14: doGet() ya no manda VENDEDOR_FOTOS cuando no se le pide una
+    tabla puntual, que es como entran las dos apps. Esa tabla es un log
+    histórico que crece ~350 filas por día y era el 62% del peso de la
+    respuesta (4.252 de 6.837 filas, 1,48 MB) — pero ni el Dashboard ni
+    el Ranking la leen: se bajaba entera en cada visita de cada vendedor
+    para nada, y proyectada a fin de temporada daba ~8,7 MB por visita.
+    La hoja se sigue escribiendo igual y el mail de control la sigue
+    usando (informeCambioHoy), y quien la necesite puede pedirla con
+    ?tabla=VENDEDOR_FOTOS. Ver conversación del 2026-10-01.
     ════════════════════════════════════════════════════════════════ */
 
 var MAIL = 'mauriciocamara85@gmail.com,antonellamazza.vanderholl@gmail.com,danielacostajnk@gmail.com,franotz.vanderholl@gmail.com,brengiselle220696@gmail.com,cintiacast15@gmail.com,nicoseg.vanderholl@gmail.com';
@@ -164,10 +174,20 @@ var NUM   = { 'Septiembre': 8, 'Octubre': 9, 'Noviembre': 10,
 var NUM_MES = { 8: 'Septiembre', 9: 'Octubre', 10: 'Noviembre',
                 11: 'Diciembre', 0: 'Enero', 1: 'Febrero' };
 
+// Las tablas que doGet() acepta si se le piden por nombre (?tabla=...), y las que se cachean.
 var TABLAS_DASHBOARD = [
   'LOCAL_DIARIO', 'VENDEDOR_DIARIO', 'VENDEDOR_SEMANAL',
   'VENDEDOR_FOTOS', 'ECOM_DIARIO', 'ECOM_SEMANAL'
 ];
+
+// v14 — qué devuelve doGet() cuando NO se le pide una tabla puntual, que es como entran las dos
+// apps. VENDEDOR_FOTOS queda afuera: es un log histórico que crece ~350 filas por día y pesaba el
+// 62% de la respuesta (4.252 de 6.837 filas, 1,48 MB), pero NI el Dashboard NI el Ranking lo leen
+// — se bajaba entero en cada visita de cada vendedor para nada, y proyectado a fin de temporada
+// eran ~8,7 MB por visita. Se sigue escribiendo en su hoja y se sigue usando para el mail de
+// control (ver informeCambioHoy), y quien lo necesite puede pedirlo con ?tabla=VENDEDOR_FOTOS.
+// Ver conversación del 2026-10-01.
+var TABLAS_POR_DEFECTO = TABLAS_DASHBOARD.filter(function (t) { return t !== 'VENDEDOR_FOTOS'; });
 
 // v7 — caché de doGet(). TTL en segundos (10 min): tiempo máximo que puede tardar en
 // reflejarse un cambio si nadie corre consolidar() manualmente en el medio (el trigger
@@ -196,7 +216,7 @@ function doGet(e) {
     return jsonResponse({ error: 'Tabla no permitida', tablas: TABLAS_DASHBOARD });
   }
 
-  var tablas = tabla ? [tabla] : TABLAS_DASHBOARD;
+  var tablas = tabla ? [tabla] : TABLAS_POR_DEFECTO;
   var respuesta = {};
   for (var i = 0; i < tablas.length; i++) {
     respuesta[tablas[i]] = leerTablaDashboardCacheada(tablas[i]);
