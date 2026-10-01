@@ -1,5 +1,5 @@
 /*  ════════════════════════════════════════════════════════════════
-    VDH · CONSOLIDADOR  (v11)
+    VDH · CONSOLIDADOR  (v14)
     Va en la planilla CONSOLIDADORA.
 
     Lee los 15 locales + la planilla de e-commerce y arma tablas
