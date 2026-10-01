@@ -106,7 +106,11 @@ function sumarPonderado(acc,venta,ticketProm,pxt,trafico){
   }else if(venta)acc.filasSinTicket++;
   return acc;
 }
-function unirPonderados(lista){return lista.reduce((acc,p)=>{['venta','ventaConTicket','tickets','prendas','trafico','filasSinTicket'].forEach(k=>acc[k]+=p[k]);return acc},nuevoPonderado())}
+// El filter(Boolean) no es decorativo: si un llamante arma sus filas y se olvida de incluir el
+// `pond`, sin él esto tira "Cannot read properties of undefined" y, como el error sube hasta
+// loadData(), se cae el dashboard ENTERO por una sola vista mal armada (pasó el 2026-10-01 con el
+// informe de temporada). Salteando los vacíos, a lo sumo se desvía un total; el resto sigue vivo.
+function unirPonderados(lista){return lista.filter(Boolean).reduce((acc,p)=>{['venta','ventaConTicket','tickets','prendas','trafico','filasSinTicket'].forEach(k=>acc[k]+=p[k]||0);return acc},nuevoPonderado())}
 function cerrarPonderado(acc){
   return{venta:acc.venta,trafico:acc.trafico,tickets:acc.tickets,prendas:acc.prendas,filasSinTicket:acc.filasSinTicket,
     ticket:acc.tickets?acc.ventaConTicket/acc.tickets:0,
@@ -1404,7 +1408,11 @@ function renderSeason(){
     const convObjs=rows.map(row=>convRate(row,'Conversión obj')).filter(v=>v>0);
     const convObj=convObjs.length?convObjs.reduce((sum,v)=>sum+v,0)/convObjs.length:0;
     const loaded=rows.some(row=>num(row,'Venta real')||num(row,'Tráfico real'));
-    return{mes,target,actual,traffic,conv,ticket,convObj,loaded,ratio:target?actual/target:0};
+    // `pond` tiene que viajar en la fila: más abajo se unen los de todos los meses para sacar el
+    // ticket y la conversión del semestre entero. Olvidarlo acá dejaba m.pond en undefined,
+    // unirPonderados() explotaba con "Cannot read properties of undefined (reading 'venta')" y,
+    // como el error sube hasta loadData(), se caía el dashboard COMPLETO — no solo esta vista.
+    return{mes,target,actual,traffic,conv,ticket,convObj,loaded,pond:pondMes,ratio:target?actual/target:0};
   });
   let accActual=0,accTarget=0;
   const monthRows=perMonth.map(m=>{accActual+=m.actual;accTarget+=m.target;return{...m,accActual,accTarget,accDelta:accActual-accTarget}});
@@ -1414,7 +1422,7 @@ function renderSeason(){
   // Ponderado sobre el semestre entero, no promedio de los promedios de cada mes.
   const pondSemestre=cerrarPonderado(unirPonderados(withData.map(m=>m.pond)));
   const avgConv=pondSemestre.conversion,avgTicket=pondSemestre.ticket;
-  $('seasonMetrics').innerHTML=metricsCard('Venta total semestre',money(totalActual),`${monthsPresent.length} mes(es) con pestaña cargada`)+metricsCard('Cumplimiento objetivo',percent(globalRatio*100),`${money(totalActual-totalTarget)} vs. objetivo`,statusTone(globalRatio))+metricsCard('Tráfico total',number(totalTraffic),`${percent(avgConv*100)} conversión promedio`)+metricsCard('Ticket promedio',money(avgTicket),'promedio simple de los meses con datos');
+  $('seasonMetrics').innerHTML=metricsCard('Venta total semestre',money(totalActual),`${monthsPresent.length} mes(es) con pestaña cargada`)+metricsCard('Cumplimiento objetivo',percent(globalRatio*100),`${money(totalActual-totalTarget)} vs. objetivo`,statusTone(globalRatio))+metricsCard('Tráfico total',number(totalTraffic),`${percent(avgConv*100)} conversión promedio`)+metricsCard('Ticket promedio',money(avgTicket),'venta del semestre ÷ tickets');
 
   const estadoFor=m=>{if(!m.loaded)return{label:'Sin datos',cls:''};if(m.ratio>=1)return{label:'En objetivo',cls:'positive'};if(m.ratio>=.9)return{label:'Alerta',cls:'warning'};return{label:'Atención',cls:'negative'}};
   $('seasonMonthTable').innerHTML=`<thead><tr><th>Mes</th><th class="align-right">Objetivo</th><th class="align-right">Venta real</th><th class="align-right">Avance</th><th class="align-right">Acum. real</th><th class="align-right">Desv. acum.</th><th>Estado</th></tr></thead><tbody>${monthRows.map(m=>{const estado=estadoFor(m);return `<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${money(m.target)}</td><td class="num">${money(m.actual)}</td><td class="num">${percent(m.ratio*100)}</td><td class="num">${money(m.accActual)}</td><td class="num ${m.accDelta>=0?'positive':'negative'}">${money(m.accDelta)}</td><td class="${estado.cls}">${estado.label}</td></tr>`}).join('')}<tr class="season-total"><td class="seller-name">Total</td><td class="num">${money(totalTarget)}</td><td class="num">${money(totalActual)}</td><td class="num">${percent(globalRatio*100)}</td><td class="num">${money(totalActual)}</td><td class="num ${totalActual-totalTarget>=0?'positive':'negative'}">${money(totalActual-totalTarget)}</td><td></td></tr></tbody>`;
