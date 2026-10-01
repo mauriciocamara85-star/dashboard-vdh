@@ -72,6 +72,11 @@ const num=(row,key)=>parseNumber(fieldValue(row,key));
 // 100. Sin esto, promediar "0.58" (58%) junto con un "58" suelto (que en realidad también es 58%,
 // pero sin normalizar pesa como si fuera 5800%) disparaba "Conversión media" a 354% en Métricas
 // vendedores y el embudo mostraba más Ventas que Tráfico — imposible (bug real, auditoría 2026-09-06).
+// Las columnas de conversión (real y objetivo) deberían venir como fracción (0,58 = 58%), pero en
+// varias planillas se cargan como número entero (58, o 50 para el objetivo). Un solo día así
+// rompe el promedio del local entero: Pacheco daba 396% de conversión por dos días cargados como
+// 51 y 56, y Grand Bourg comparaba contra un objetivo de 5000%. Se normaliza al leer — el arreglo
+// de fondo es en la planilla, esto solo evita que un tipeo tire abajo toda una vista.
 const convRate=(row,key)=>{const v=num(row,key);return v>1?v/100:v};
 function normalizeDate(value){if(value instanceof Date&&!Number.isNaN(value.getTime()))return value.toISOString().slice(0,10);const text=String(value??'').trim();if(!text)return '';const iso=text.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return iso.slice(1).join('-');const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);if(dmy)return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;const parsed=new Date(text);return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10)}
 // El dashboard entero muestra fechas en formato argentino día/mes/año — normalizeDate de arriba
@@ -271,11 +276,11 @@ function computeStoreFocusRows(rows){
     if(!groups[key])groups[key]={local:key,traffic:0,targetTraffic:0,convSum:0,convCount:0,convObjSum:0,convObjCount:0,ticketSum:0,ticketCount:0,ticketObjSum:0,ticketObjCount:0,count:0};
     const g=groups[key];
     g.traffic+=num(row,'Tráfico real');g.targetTraffic+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
-    const conv=num(row,'Conversión'),convObj=num(row,'Conversión obj');
-    if(conv||conv===0){g.convSum+=conv;g.convCount++}
+    const conv=convRate(row,'Conversión'),convObj=convRate(row,'Conversión obj');
+    if(conv){g.convSum+=conv;g.convCount++}
     if(convObj){g.convObjSum+=convObj;g.convObjCount++}
     const ticket=num(row,'Ticket prom.'),ticketObj=num(row,'Ticket obj');
-    if(ticket||ticket===0){g.ticketSum+=ticket;g.ticketCount++}
+    if(ticket){g.ticketSum+=ticket;g.ticketCount++}
     if(ticketObj){g.ticketObjSum+=ticketObj;g.ticketObjCount++}
     g.count++;
   });
@@ -338,13 +343,14 @@ function renderStoreFocus(rows){
 // en la nota al pie del panel para que nadie lo lea como un error de cálculo.
 const TICKET_MIN_VALIDO=1000;
 
-// Precio de lista de accesorios (dato del negocio, no viene en el endpoint: el consolidador manda
-// SOLO las unidades vendidas de cada uno). Los pesos de perfumes/boxers se estiman como
-// unidades × este precio, así que son precio de LISTA, no lo efectivamente facturado: con
-// descuentos o promos el número real es menor. Si cambian los precios, se editan acá.
-const PRECIO_PERFUME=23999,PRECIO_BOXER=17999;
-// Objetivo de participación de cada categoría sobre la venta del local, para la columna "Falta 2%".
-const ACCESORIO_OBJETIVO_PCT=0.02;
+// Precio de accesorios y objetivo de participación. Desde la v12 del consolidador los tres
+// llegan POR LOCAL en LOCAL_DIARIO ('Precio perfume', 'Precio boxer', 'Factor accesorios'),
+// leídos del bloque CONFIGURACIÓN de su planilla, así que pueden ser distintos en cada local y
+// se actualizan solos cuando cambia el precio. Estos valores quedan como RESPALDO para cuando
+// el endpoint todavía no los manda (consolidador viejo) o el bloque no se pudo leer — sin esto
+// la tabla mostraría $0 en toda la columna de pesos. Los pesos son unidades × precio de lista:
+// con descuentos o promos, lo facturado es menor.
+const PRECIO_PERFUME=23999,PRECIO_BOXER=18999,ACCESORIO_OBJETIVO_PCT=0.02;
 
 // Perfumes/Boxers vienen por VENDEDOR y por SEMANA (VENDEDOR_SEMANAL), no por día ni por local: se
 // suman los vendedores de cada local en las semanas que toca el período filtrado. Si el filtro de
@@ -367,7 +373,8 @@ function computeStoreBreakdownRows(rows){
     const local=row.Local||'Sin local';
     const g=groups[local]||(groups[local]={local,venta:0,traffic:0,tickets:0,prendas:0,diasRaros:0,
       cash:0,cashCount:0,card:0,cardCount:0,discount:0,discountCount:0,pxt:0,pxtCount:0,
-      convObj:0,convObjCount:0,ticketObj:0,ticketObjCount:0,pxtObj:0,pxtObjCount:0});
+      convObj:0,convObjCount:0,ticketObj:0,ticketObjCount:0,pxtObj:0,pxtObjCount:0,
+      precioPerf:0,precioPerfCount:0,precioBox:0,precioBoxCount:0,factorAcc:0,factorAccCount:0});
     const venta=num(row,'Venta real'),ticketProm=num(row,'Ticket prom.'),pxt=num(row,'PxT real');
     g.venta+=venta;
     g.traffic+=num(row,'Tráfico real');
@@ -380,7 +387,7 @@ function computeStoreBreakdownRows(rows){
       else g.diasRaros++;
     }
     const cash=num(row,'Efectivo'),card=num(row,'Tarjeta'),discount=num(row,'Descuento');
-    const convObj=num(row,'Conversión obj'),ticketObj=num(row,'Ticket obj'),pxtObj=num(row,'PxT obj');
+    const convObj=convRate(row,'Conversión obj'),ticketObj=num(row,'Ticket obj'),pxtObj=num(row,'PxT obj');
     if(cash){g.cash+=cash;g.cashCount++}
     if(card){g.card+=card;g.cardCount++}
     if(discount){g.discount+=discount;g.discountCount++}
@@ -388,6 +395,10 @@ function computeStoreBreakdownRows(rows){
     if(convObj){g.convObj+=convObj;g.convObjCount++}
     if(ticketObj){g.ticketObj+=ticketObj;g.ticketObjCount++}
     if(pxtObj){g.pxtObj+=pxtObj;g.pxtObjCount++}
+    const precioPerf=num(row,'Precio perfume'),precioBox=num(row,'Precio boxer'),factorAcc=num(row,'Factor accesorios');
+    if(precioPerf){g.precioPerf+=precioPerf;g.precioPerfCount++}
+    if(precioBox){g.precioBox+=precioBox;g.precioBoxCount++}
+    if(factorAcc){g.factorAcc+=factorAcc;g.factorAccCount++}
     if(row.Mes!==undefined&&row.Semana!==undefined)weekKeys.add(`${row.Mes}|${row.Semana}`);
   });
   const accesorios=accessoryUnitsByStore(weekKeys);
@@ -396,8 +407,13 @@ function computeStoreBreakdownRows(rows){
     const pctCash=avg(g.cash,g.cashCount),pctCard=avg(g.card,g.cardCount),pctDiscount=avg(g.discount,g.discountCount);
     const bruto=pctDiscount>0&&pctDiscount<1?g.venta/(1-pctDiscount):g.venta;
     const acc=accesorios[g.local]||{perfumes:0,boxer:0};
-    const perfumesMonto=acc.perfumes*PRECIO_PERFUME,boxerMonto=acc.boxer*PRECIO_BOXER;
-    const objetivoAcc=g.venta*ACCESORIO_OBJETIVO_PCT;
+    // El ||  cubre los dos casos de "no vino": que el endpoint no mande la columna todavía y que
+    // la mande en 0 porque no se pudo leer el bloque CONFIGURACIÓN de esa planilla.
+    const precioPerfume=avg(g.precioPerf,g.precioPerfCount)||PRECIO_PERFUME;
+    const precioBoxer=avg(g.precioBox,g.precioBoxCount)||PRECIO_BOXER;
+    const factorAcc=avg(g.factorAcc,g.factorAccCount)||ACCESORIO_OBJETIVO_PCT;
+    const perfumesMonto=acc.perfumes*precioPerfume,boxerMonto=acc.boxer*precioBoxer;
+    const objetivoAcc=g.venta*factorAcc;
     return{
       local:g.local,venta:g.venta,bruto,descuentos:bruto-g.venta,pctDiscount,
       efectivo:g.venta*pctCash,tarjeta:g.venta*pctCard,pctCash,pctCard,
@@ -408,6 +424,7 @@ function computeStoreBreakdownRows(rows){
       productoProm:g.prendas?g.venta/g.prendas:0,
       pxt:avg(g.pxt,g.pxtCount),
       convObj:avg(g.convObj,g.convObjCount),ticketObj:avg(g.ticketObj,g.ticketObjCount),pxtObj:avg(g.pxtObj,g.pxtObjCount),
+      precioPerfume,precioBoxer,factorAcc,
       perfumes:acc.perfumes,perfumesMonto,perfumesPct:g.venta?perfumesMonto/g.venta:0,perfumesFalta:objetivoAcc-perfumesMonto,
       boxer:acc.boxer,boxerMonto,boxerPct:g.venta?boxerMonto/g.venta:0,boxerFalta:objetivoAcc-boxerMonto,
       diasRaros:g.diasRaros
@@ -444,7 +461,7 @@ function breakdownHeader(cols,tableId){
     return `<th data-sort="${key}" tabindex="0" aria-sort="${sortAttr}"${key==='local'?'':' class="align-right"'}>${label}${isActive?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`;
   }).join('')}</tr></thead>`;
 }
-const pxtTexto=value=>value.toFixed(2).replace('.',',');
+const pxtTexto=(value,decimales=2)=>Number(value||0).toFixed(decimales).replace('.',',');
 
 function renderStoreBreakdown(rows){
   const base=computeStoreBreakdownRows(rows);
@@ -493,10 +510,10 @@ function renderStoreBreakdown(rows){
   const accCols=[['Local','local'],['Perfumes u.','perfumes'],['Perfumes $','perfumesMonto'],['% s/venta','perfumesPct'],['Falta 2%','perfumesFalta'],
     ['Boxers u.','boxer'],['Boxers $','boxerMonto'],['% s/venta','boxerPct'],['Falta 2%','boxerFalta']];
   const accCeldas=r=>`<td class="num">${number(r.perfumes)}</td><td class="num">${money(r.perfumesMonto)}</td>`+
-    `<td class="num ${r.perfumesPct>=ACCESORIO_OBJETIVO_PCT?'positive':'negative'}">${percent(r.perfumesPct*100)}</td>`+
+    `<td class="num ${r.perfumesPct>=(r.factorAcc||ACCESORIO_OBJETIVO_PCT)?'positive':'negative'}">${percent(r.perfumesPct*100)}</td>`+
     `<td class="num">${r.perfumesFalta<=0?'✓':money(r.perfumesFalta)}</td>`+
     `<td class="num">${number(r.boxer)}</td><td class="num">${money(r.boxerMonto)}</td>`+
-    `<td class="num ${r.boxerPct>=ACCESORIO_OBJETIVO_PCT?'positive':'negative'}">${percent(r.boxerPct*100)}</td>`+
+    `<td class="num ${r.boxerPct>=(r.factorAcc||ACCESORIO_OBJETIVO_PCT)?'positive':'negative'}">${percent(r.boxerPct*100)}</td>`+
     `<td class="num">${r.boxerFalta<=0?'✓':money(r.boxerFalta)}</td>`;
   const accLista=[...base];sortBreakdownList(accLista,'storeAccessoryTable',STORE_ACCESSORY_SORT);
   $('storeAccessoryTable').innerHTML=breakdownHeader(accCols,'storeAccessoryTable')+
@@ -512,7 +529,11 @@ function renderStoreBreakdown(rows){
     'Tráfico y Conversión salen de la planilla: cuentan la gente que ENTRÓ al local, no los clientes atendidos en el sistema de ventas. Por eso la conversión da más baja que la de un reporte de caja.',
     tot.vtaFallida>0?`Las <strong>${number(tot.vtaFallida)}</strong> personas que entraron y no compraron equivalen a <strong>${money(tot.vtaFallida*tot.ticketProm)}</strong> al ticket promedio de la red.`:'',
     raros.length?`<span class="negative">Revisar la planilla:</span> ${raros.map(r=>`${escapeHtml(r.local)} (${r.diasRaros} ${r.diasRaros===1?'día':'días'})`).join(', ')} tienen el Ticket promedio cargado en miles en vez de en pesos. Esos días quedaron fuera de Cantidad, Ventas y Conversión.`:'',
-    `Los pesos de accesorios son unidades × precio de lista (perfume ${money(PRECIO_PERFUME)}, boxer ${money(PRECIO_BOXER)}): con descuentos, lo facturado es menor.`
+    (()=>{
+      const perf=[...new Set(base.map(r=>r.precioPerfume))],box=[...new Set(base.map(r=>r.precioBoxer))];
+      const detalle=perf.length===1&&box.length===1?` (perfume ${money(perf[0])}, boxer ${money(box[0])})`:' al precio cargado en la planilla de cada local';
+      return `Los pesos de accesorios son unidades × precio de lista${detalle}: con descuentos, lo facturado es menor.`;
+    })()
   ].filter(Boolean).join(' ');
   attachSortHeaders('storeBreakdownTable');
   attachSortHeaders('storeAccessoryTable');
@@ -526,7 +547,7 @@ function localObjetivoFor(local,month){
   // (todos los días del mes) — si algún día quedó sin esa columna cargada, dividir por el total de
   // días diluía el promedio por debajo del valor mensual real (bug real, auditoría 2026-09-05).
   const totals=refRows.reduce((acc,row)=>{
-    const convObj=num(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
+    const convObj=convRate(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
     if(convObj){acc.convObj+=convObj;acc.convObjCount++}
     if(ticketObj){acc.ticketObj+=ticketObj;acc.ticketObjCount++}
     return acc;
@@ -1093,7 +1114,7 @@ function renderRankBadges(){
   // fmt de conv multiplica por 100: el valor llega como fracción (convRate en vendorHistory/
   // localHistory), igual que en cualquier otro lado del dashboard que muestra un % (auditoría
   // 2026-09-06).
-  const metricMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:number}};
+  const metricMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:v=>pxtTexto(v,1)}};
   const records=[];
   histories.forEach(h=>{
     if(h.weeks.length<2)return;
@@ -1201,7 +1222,7 @@ function renderEvolutionWeeks(weeks,heading){
   $('evolutionTable').innerHTML=`<thead><tr><th>Semana</th><th class="align-right">% cumplimiento</th><th class="align-right">Mejora</th><th class="align-right">Ticket prom.</th><th class="align-right">Conversión</th><th class="align-right">PxT</th></tr></thead><tbody>${rows}</tbody>`;
 
   // fmt de conv multiplica por 100 — mismo motivo que metricMeta más arriba (auditoría 2026-09-06).
-  const badgeMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:number}};
+  const badgeMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:v=>pxtTexto(v,1)}};
   $('evolutionBadges').innerHTML=recordBadges.length?recordBadges.map(m=>{const meta=badgeMeta[m];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>Récord de ${meta.label}</strong><span>esta semana</span></div><span class="badge-value">${meta.fmt(rec[m].value)}</span></div>`}).join(''):'<div class="empty-state">Sin récords nuevos esta semana</div>';
 }
 function renderRankMejora(){
@@ -1343,11 +1364,11 @@ function renderSeason(){
     const target=rows.reduce((sum,row)=>sum+num(row,'Objetivo'),0);
     const actual=rows.reduce((sum,row)=>sum+num(row,'Venta real'),0);
     const traffic=rows.reduce((sum,row)=>sum+num(row,'Tráfico real'),0);
-    const convs=rows.map(row=>num(row,'Conversión')).filter(v=>v||v===0);
+    const convs=rows.map(row=>convRate(row,'Conversión')).filter(Boolean);
     const conv=convs.length?convs.reduce((sum,v)=>sum+v,0)/convs.length:0;
-    const tickets=rows.map(row=>num(row,'Ticket prom.')).filter(v=>v||v===0);
+    const tickets=rows.map(row=>num(row,'Ticket prom.')).filter(Boolean);
     const ticket=tickets.length?tickets.reduce((sum,v)=>sum+v,0)/tickets.length:0;
-    const convObjs=rows.map(row=>num(row,'Conversión obj')).filter(v=>v>0);
+    const convObjs=rows.map(row=>convRate(row,'Conversión obj')).filter(v=>v>0);
     const convObj=convObjs.length?convObjs.reduce((sum,v)=>sum+v,0)/convObjs.length:0;
     const loaded=rows.some(row=>num(row,'Venta real')||num(row,'Tráfico real'));
     return{mes,target,actual,traffic,conv,ticket,convObj,loaded,ratio:target?actual/target:0};
@@ -1442,10 +1463,23 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   // romper localObjetivoFor() más abajo, que necesita el nombre exacto de un local de LOCAL_DIARIO.
   rows.forEach(row=>{
     const key=row.Vendedor;
-    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,conversion:0,ticket:0,garments:0,count:0};
+    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,conversion:0,convCount:0,ticket:0,ticketCount:0,garments:0,garmentsCount:0,count:0};
     const group=groups[key];
     group.locales.add(row.Local);
-    group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');group.conversion+=convRate(row,'Conv real');group.ticket+=num(row,'TP real');group.garments+=num(row,'PxT real');group.count++;
+    group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');
+    // Conversión/TP/PxT se promedian SOLO sobre las semanas que tienen el dato cargado, no sobre
+    // todas las filas del vendedor. VENDEDOR_SEMANAL trae una fila por CADA semana del semestre y
+    // las que todavía no se trabajaron llegan en cero (en la planilla esas celdas están vacías, el
+    // consolidador las publica como 0). Dividir por todas hundía el promedio: Sebas Ramon daba 28%
+    // de conversión y $33.614 de ticket contra el 70% y $84.035 de su planilla, porque tres de sus
+    // cinco semanas estaban vacías (bug real reportado el 2026-09-30, verificado contra la planilla
+    // de Rivadavia y contra el sistema de ventas). Mismo criterio que el bloque `monthly` de
+    // renderStores y que la propia planilla, que promedia con PROMEDIO() sobre las celdas cargadas.
+    const conv=convRate(row,'Conv real'),tp=num(row,'TP real'),pxt=num(row,'PxT real');
+    if(conv){group.conversion+=conv;group.convCount++}
+    if(tp){group.ticket+=tp;group.ticketCount++}
+    if(pxt){group.garments+=pxt;group.garmentsCount++}
+    group.count++;
   });
   const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;
   // "Semanas en objetivo" ignora el filtro de Semana a propósito (mismo criterio que "Cierre
@@ -1459,7 +1493,7 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   // cantidad de semanas cargadas no da un promedio válido para ordenar).
   const list=Object.values(groups).map(g=>{
     const local=[...g.locales].sort().join(' + ');
-    const conversionAvg=g.count?g.conversion/g.count:0,ticketAvg=g.count?g.ticket/g.count:0,garmentsAvg=g.count?g.garments/g.count:0;
+    const conversionAvg=g.convCount?g.conversion/g.convCount:0,ticketAvg=g.ticketCount?g.ticket/g.ticketCount:0,garmentsAvg=g.garmentsCount?g.garments/g.garmentsCount:0;
     const ratio=g.target?g.sale/g.target:0;
     const comp=compliance[g.name]||{met:0,total:0};
     return{...g,local,conversionAvg,ticketAvg,garmentsAvg,ratio,weeksMet:comp.met,weeksTotal:comp.total};
@@ -1477,9 +1511,11 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     return acc;
   },{actual:0,target:0});
   const totalTraffic=list.reduce((sum,row)=>sum+row.traffic,0);
-  const avgConv=list.length?list.reduce((sum,row)=>sum+row.conversion/Math.max(1,row.count),0)/list.length:0;
-  const avgTicket=list.length?list.reduce((sum,row)=>sum+row.ticket/Math.max(1,row.count),0)/list.length:0;
-  const avgGarments=list.length?list.reduce((sum,row)=>sum+row.garments/Math.max(1,row.count),0)/list.length:0;
+  // Reusan el promedio ya calculado por vendedor (conversionAvg/ticketAvg/garmentsAvg) en vez de
+  // volver a dividir por row.count, que arrastraba el mismo error de las semanas vacías.
+  const avgConv=list.length?list.reduce((sum,row)=>sum+row.conversionAvg,0)/list.length:0;
+  const avgTicket=list.length?list.reduce((sum,row)=>sum+row.ticketAvg,0)/list.length:0;
+  const avgGarments=list.length?list.reduce((sum,row)=>sum+row.garmentsAvg,0)/list.length:0;
   // Conversión/Ticket objetivo son del LOCAL, no por vendedor (ver localObjetivoFor) — se promedia el
   // objetivo de los locales presentes en la vista actual para el diagnóstico y la card de referencia.
   // Se arma desde row.locales (los locales reales, sin combinar) y no desde row.local (que puede ser
@@ -1491,7 +1527,7 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   const avgConvObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.convObj,0)/localObjs.length:0;
   const avgTicketObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.ticketObj,0)/localObjs.length:0;
   const hasConvObj=avgConvObj>0,hasTicketObj=avgTicketObj>0;
-  $('sellerDetailMetrics').innerHTML=metricsCard('Vendedores visibles',number(list.length),'según filtros')+progressCard('Venta',money,dailyTotals.actual,dailyTotals.target,'según registros diarios')+metricsCard('Tráfico real',number(totalTraffic),'personas registradas')+metricsCard('Conversión media',percent(avgConv*100),hasConvObj?`${avgConv>=avgConvObj?'+':''}${percent((avgConv-avgConvObj)*100)} vs. objetivo (${percent(avgConvObj*100)})`:'conversión del período',hasConvObj?(avgConv>=avgConvObj?'good':'bad'):'')+metricsCard('Ticket promedio',money(avgTicket),hasTicketObj?`objetivo ${money(avgTicketObj)}`:'promedio entre vendedores',hasTicketObj?(avgTicket>=avgTicketObj?'good':'bad'):'')+metricsCard('Prendas por ticket',number(avgGarments),'promedio entre vendedores');
+  $('sellerDetailMetrics').innerHTML=metricsCard('Vendedores visibles',number(list.length),'según filtros')+progressCard('Venta',money,dailyTotals.actual,dailyTotals.target,'según registros diarios')+metricsCard('Tráfico real',number(totalTraffic),'personas registradas')+metricsCard('Conversión media',percent(avgConv*100),hasConvObj?`${avgConv>=avgConvObj?'+':''}${percent((avgConv-avgConvObj)*100)} vs. objetivo (${percent(avgConvObj*100)})`:'conversión del período',hasConvObj?(avgConv>=avgConvObj?'good':'bad'):'')+metricsCard('Ticket promedio',money(avgTicket),hasTicketObj?`objetivo ${money(avgTicketObj)}`:'promedio entre vendedores',hasTicketObj?(avgTicket>=avgTicketObj?'good':'bad'):'')+metricsCard('Prendas por ticket',pxtTexto(avgGarments,1),'promedio entre vendedores');
   renderTrafficFunnel('sellerFunnel',list.length>0,totalTraffic,avgConv);
   renderDiagnosisPanel('sellerDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderSellerFocus(list,metricsMonth);
@@ -1509,7 +1545,7 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     const weeksCell=weeksRatio!==null
       ?`<td class="num ${weeksRatio>=1?'positive':weeksRatio<.9?'negative':'warning'}">${row.weeksMet} de ${row.weeksTotal}</td>`
       :'<td class="num"><span class="missing-value">Sin datos</span></td>';
-    return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${number(row.garmentsAvg)}</td><td class="num ${row.ratio>=1?'positive':row.ratio<.9?'negative':'warning'}">${percent(row.ratio*100)}</td>${weeksCell}</tr>`;
+    return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${pxtTexto(row.garmentsAvg,1)}</td><td class="num ${row.ratio>=1?'positive':row.ratio<.9?'negative':'warning'}">${percent(row.ratio*100)}</td>${weeksCell}</tr>`;
   }).join('');
   $('sellerDetailTable').innerHTML=`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Venta','sale',true)}${headerCell('Objetivo','target',true)}${headerCell('Tráfico','traffic',true)}${headerCell('Conversión','conversionAvg',true)}${headerCell('Ticket promedio','ticketAvg',true)}${headerCell('Prendas por ticket','garmentsAvg',true)}${headerCell('% objetivo','ratio',true)}${headerCell('Semanas en objetivo','weeksRatio',true)}</tr></thead><tbody>${body||'<tr><td colspan="10" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;
   $('sellerDetailRowsCount').textContent=`${list.length} vendedores`;
@@ -2064,14 +2100,14 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
 
   $('deviationCard').innerHTML=rowLocales+rowOnline+rowFoco+rowBanner;
 }
-function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;const conversions=rows.map(row=>num(row,'Conversión')).filter(value=>value||value===0),avgConv=conversions.length?conversions.reduce((sum,value)=>sum+value,0)/conversions.length:0;const tickets=rows.map(row=>num(row,'Ticket prom.')).filter(value=>value||value===0),avgTicket=tickets.length?tickets.reduce((sum,value)=>sum+value,0)/tickets.length:0;
+function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;const conversions=rows.map(row=>convRate(row,'Conversión')).filter(Boolean),avgConv=conversions.length?conversions.reduce((sum,value)=>sum+value,0)/conversions.length:0;const tickets=rows.map(row=>num(row,'Ticket prom.')).filter(Boolean),avgTicket=tickets.length?tickets.reduce((sum,value)=>sum+value,0)/tickets.length:0;
   // Efectivo/Tarjeta/Descuento/objetivos son valores mensuales repetidos en cada día del mes: se
   // promedian, no se suman. Se divide por la cantidad de días donde cada campo realmente vino
   // cargado (no por monthly.count = todos los días del período) — si esa columna se agregó a mitad
   // de mes o falta en algún día, dividir por el total diluía el % por debajo del valor real
   // (bug real, auditoría 2026-09-05).
   const monthly=rows.reduce((acc,row)=>{
-    const cash=num(row,'Efectivo'),card=num(row,'Tarjeta'),discount=num(row,'Descuento'),convObj=num(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
+    const cash=num(row,'Efectivo'),card=num(row,'Tarjeta'),discount=num(row,'Descuento'),convObj=convRate(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
     if(cash){acc.cash+=cash;acc.cashCount++}
     if(card){acc.card+=card;acc.cardCount++}
     if(discount){acc.discount+=discount;acc.discountCount++}
@@ -2177,7 +2213,7 @@ function storeDailySeries(rows){
     d.target+=num(row,'Objetivo');
     d.traffic+=num(row,'Tráfico real');
     d.trafficTarget+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
-    const conv=num(row,'Conversión');if(conv||conv===0){d.convSum+=conv;d.convCount++}
+    const conv=convRate(row,'Conversión');if(conv){d.convSum+=conv;d.convCount++}
     const ticket=num(row,'Ticket prom.');if(ticket){d.ticketSum+=ticket;d.ticketCount++}
     d.cash+=num(row,'Efectivo');d.card+=num(row,'Tarjeta');d.discount+=num(row,'Descuento');d.payCount++;
   });

@@ -104,6 +104,17 @@
     Son valores mensuales: se repiten iguales en cada fila semanal de
     ese mes, igual que Efectivo/Conversión obj/Ticket obj en
     LOCAL_DIARIO. Ver conversación del 2026-09-17.
+
+    v12: LOCAL_DIARIO suma "Precio perfume", "Precio boxer" y
+    "Factor accesorios", los tres del bloque CONFIGURACIÓN de
+    "[Mes] Informe Vendedor" de cada local. El dashboard los tenía
+    hardcodeados para poder mostrar los pesos de perfumes/boxers
+    (solo llegaban las unidades) y ya estaban desactualizados: el
+    código decía $17.999 de boxer contra los $18.999 de la planilla.
+    Son valores mensuales del local, se repiten en cada fila del día.
+    Se leen POR ETIQUETA — ver valorPorEtiqueta(), que desde esta
+    versión también sabe mirar DEBAJO del título, que es donde están
+    los dos precios. Ver conversación del 2026-09-30.
     ════════════════════════════════════════════════════════════════ */
 
 var MAIL = 'mauriciocamara85@gmail.com,antonellamazza.vanderholl@gmail.com,danielacostajnk@gmail.com,franotz.vanderholl@gmail.com,brengiselle220696@gmail.com,cintiacast15@gmail.com,nicoseg.vanderholl@gmail.com';
@@ -310,7 +321,8 @@ function consolidar() {
       ['Fecha', 'Local', 'Mes', 'Semana', 'Día', 'Objetivo', 'Venta real',
        'Tráfico nec.', 'Tráfico real', 'Conversión', 'Ticket prom.',
        'Efectivo', 'Tarjeta', 'Descuento', 'Conversión obj', 'Ticket obj',
-       'PxT real', 'PxT obj'], diario);
+       'PxT real', 'PxT obj',
+       'Precio perfume', 'Precio boxer', 'Factor accesorios'], diario);
     escribir('VENDEDOR_DIARIO',
       ['Fecha', 'Local', 'Mes', 'Semana', 'Día', 'Vendedor',
        'Venta real', 'Objetivo del día'], vendDiario);
@@ -376,6 +388,19 @@ function leerLocal(local, hoy, diario, vendDiario, vendSemanal, fotos) {
     // en cada día de ese mes.
     var pxtReal = num(hT.getRange('J4').getValue());
 
+    // v12 — precio de perfume y de boxer, y el factor de objetivo de accesorios (0,02 = 2% de
+    // la venta), del bloque CONFIGURACIÓN de "Informe Vendedor". Son valores mensuales del
+    // LOCAL: se repiten en cada día, igual que Efectivo/Ticket obj. Antes vivían SOLO en la
+    // planilla y el dashboard los tenía hardcodeados, así que un cambio de precio obligaba a
+    // tocar código (y de hecho estaban desactualizados). Se leen POR ETIQUETA, no por celda
+    // fija: los dos precios tienen el importe DEBAJO del título, de ahí el tercer argumento.
+    // Si el bloque se mueve o se renombra, valorPorEtiqueta() devuelve 0 y el dashboard cae
+    // solo a su valor por defecto en vez de mostrar $0.
+    var CFG_I = hI.getRange('A12:N22').getValues();
+    var precioPerfume = valorPorEtiqueta(CFG_I, ['precio perfume'], true);
+    var precioBoxer   = valorPorEtiqueta(CFG_I, ['precio boxer'], true);
+    var factorAccesorios = valorPorEtiqueta(CFG_I, ['factor perf', 'factor accesorio']);
+
     var V = hV.getRange('C24:J88').getValues();
     var T = hT.getRange('C23:J62').getValues();
     var I = hI.getRange('C26:I107').getValues();
@@ -409,7 +434,8 @@ function leerLocal(local, hoy, diario, vendDiario, vendSemanal, fotos) {
                      num(V[bv + 2][c]), num(V[bv + 3][c]), num(T[bt + 1][c]),
                      num(T[bt + 2][c]), num(T[bt + 3][c]), num(T[bt + 4][c]),
                      efectivo, tarjeta, descuento, convObjetivo, ticketObjetivo,
-                     pxtReal, PXT_OBJETIVO]);
+                     pxtReal, PXT_OBJETIVO,
+                     precioPerfume, precioBoxer, factorAccesorios]);
 
         // v6 — objetivo diario POR VENDEDOR: su Venta obj semanal (I[bi][b], ya calculada en
         // "Informe Vendedor" a partir del % Objetivo mensual de cada uno) prorrateada por el peso
@@ -523,7 +549,7 @@ function leerEcommerce(ecomDia, ecomSem) {
 // que sigue, con celdas vacías en el medio cuando hay combinaciones. Se compara en minúsculas y
 // por prefijo, así "Conversión obj" también matchea "Conversión objetivo". Devuelve 0 si no
 // encuentra la etiqueta o si no hay ningún número a su derecha.
-function valorPorEtiqueta(grilla, etiquetas) {
+function valorPorEtiqueta(grilla, etiquetas, buscarAbajo) {
   for (var f = 0; f < grilla.length; f++) {
     for (var c = 0; c < grilla[f].length; c++) {
       var texto = String(grilla[f][c] === null || grilla[f][c] === undefined ? '' : grilla[f][c])
@@ -536,6 +562,15 @@ function valorPorEtiqueta(grilla, etiquetas) {
       if (!coincide) continue;
       for (var d = c + 1; d < grilla[f].length; d++) {
         if (typeof grilla[f][d] === 'number' && grilla[f][d] !== 0) return grilla[f][d];
+      }
+      // v12 — algunos bloques ponen el número DEBAJO del título en vez de al lado: en
+      // "Informe Vendedor", "Precio Perfume" y "Precio Boxer" son encabezados con el
+      // importe en la fila siguiente. Solo se mira hacia abajo si el llamador lo pide, para no
+      // cambiar lo que ya devuelven los llamadores que existían antes (e-commerce).
+      if (buscarAbajo) {
+        for (var g = f + 1; g < grilla.length && g <= f + 3; g++) {
+          if (typeof grilla[g][c] === 'number' && grilla[g][c] !== 0) return grilla[g][c];
+        }
       }
     }
   }
