@@ -2135,12 +2135,16 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
   // `baseLocales` solo lo recibe la fila de Online: cuánto pesa el canal sobre la venta de los
   // locales. Va acá y no en una tarjeta propia porque es la relación entre las dos filas que este
   // panel ya muestra una debajo de la otra.
+  //
+  // Y va arriba, a la derecha del kicker, NO pegado al texto de abajo: .deviation-copy tiene
+  // max-width:220px y la fila alto fijo (flex:1), así que sumarle texto ahí lo mandaba a dos líneas
+  // y la segunda se comía el número de la fila. La línea del kicker, en cambio, está vacía.
   const channelRow=(label,a,baseLocales)=>{
     const hasTarget=a.target>0,ratio=hasTarget?a.actual/a.target:0;
     const tone=hasTarget?statusTone(ratio):'';
-    const partes=[hasTarget?`${percent(ratio*100)} de su objetivo (${moneyShort(a.target)})`:'Sin objetivo cargado'];
-    if(baseLocales>0)partes.push(`${percent(a.actual/baseLocales*100)} de la venta de locales`);
-    return `<div class="resumen-row"><span class="section-kicker">${label}</span><div class="deviation-number ${tone}">${money(a.actual)}</div><div class="deviation-copy">${partes.join(' · ')}</div></div>`;
+    const detalle=hasTarget?`${percent(ratio*100)} de su objetivo (${moneyShort(a.target)})`:'Sin objetivo cargado';
+    const peso=baseLocales>0?`<span class="resumen-share">${percent(a.actual/baseLocales*100)} de la venta de locales</span>`:'';
+    return `<div class="resumen-row"><div class="resumen-row-head"><span class="section-kicker">${label}</span>${peso}</div><div class="deviation-number ${tone}">${money(a.actual)}</div><div class="deviation-copy">${detalle}</div></div>`;
   };
   const rowLocales=channelRow('LOCALES',aLocalCh);
   const rowOnline=channelRow('ONLINE',aEcomCh,aLocalCh.actual);

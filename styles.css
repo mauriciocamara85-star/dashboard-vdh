@@ -536,7 +536,14 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
 .deviation-number{font:600 53px var(--display);line-height:1;margin:10px 0}
 .deviation-number.good{color:var(--mint)}
 .deviation-number.bad{color:var(--red)}
-.deviation-copy{color:var(--muted);max-width:220px}
+/* nowrap + ellipsis: la fila tiene alto fijo (flex:1 dentro de #deviationCard), así que un texto
+   que pase a dos líneas no agranda la fila — desborda y tapa el número de arriba. Pasó el 01/10 al
+   sumarle el peso del canal online. Si no entra, que recorte; nunca que rompa la fila. */
+.deviation-copy{color:var(--muted);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Encabezado de cada fila: el kicker a la izquierda y, cuando hay, un dato al ras de la derecha
+   (hoy, cuánto pesa Online sobre la venta de locales). Esa línea estaba vacía a lo ancho. */
+.resumen-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0}
+.resumen-share{font-size:10.5px;color:var(--muted);white-space:nowrap;flex:none}
 /* "Resumen Ejecutivo" (#deviationCard): override puntual por id, no toca la clase .deviation-card
    compartida con #ecomProjection (esa sigue con un solo bloque centrado, sin split-en-dos). */
 /* 4 filas apiladas a todo el ancho, cada una flex:1 (el banner un poco más chico) — se reparten la
