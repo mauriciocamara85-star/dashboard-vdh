@@ -115,6 +115,12 @@
     Se leen POR ETIQUETA — ver valorPorEtiqueta(), que desde esta
     versión también sabe mirar DEBAJO del título, que es donde están
     los dos precios. Ver conversación del 2026-09-30.
+
+    v13: num() entiende el formato argentino. Una celda de TEXTO con
+    "34.500" devolvía 34,5 porque parseFloat lee el punto como decimal.
+    Las celdas que Sheets guarda como número nunca pasaron por ahí, así
+    que el problema aparecía salteado, en los días sueltos que alguien
+    pegó como texto. Ver conversación del 2026-09-30.
     ════════════════════════════════════════════════════════════════ */
 
 var MAIL = 'mauriciocamara85@gmail.com,antonellamazza.vanderholl@gmail.com,danielacostajnk@gmail.com,franotz.vanderholl@gmail.com,brengiselle220696@gmail.com,cintiacast15@gmail.com,nicoseg.vanderholl@gmail.com';
@@ -728,10 +734,27 @@ function acumularFotos(nuevas, hoy) {
   escribir('VENDEDOR_FOTOS', cab, previas.concat(nuevas));
 }
 
+// v13 — parseo de números en formato ARGENTINO. Las celdas que Sheets guarda como número pasan
+// derecho; el problema son las que quedaron como TEXTO (alguien las pegó o las tipeó), donde el
+// punto es separador de MILES y la coma el decimal. La versión vieja hacía parseFloat('34.500') y
+// devolvía 34,5: el Ticket promedio del 8/9 de Grand Bourg entró como $34,5 en vez de $34.500 y el
+// del 11/9 de Ituzaingó como $48,743 en vez de $48.743. Con eso el dashboard calculaba 16.000
+// tickets en un día y dejaba la conversión y las unidades del local sin sentido. La planilla
+// estaba bien — lo que leía mal era esto (reportado el 2026-09-30).
 function num(v) {
   if (v === '' || v === null || v === undefined) return 0;
   if (typeof v === 'number') return v;
-  var n = parseFloat(String(v).replace(/[^0-9.,-]/g, '').replace(',', '.'));
+  var s = String(v).replace(/[^0-9.,-]/g, '');
+  if (!s) return 0;
+  if (s.indexOf(',') >= 0) {
+    // Hay coma: es el decimal, así que todos los puntos son separadores de miles.
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+    // Sin coma, pero con puntos que SIEMPRE separan grupos de exactamente 3 dígitos: miles.
+    // '34.500' y '1.234.567' entran acá; '2.5' (PxT) y '0.47' (conversión) no, y quedan intactos.
+    s = s.replace(/\./g, '');
+  }
+  var n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
 
