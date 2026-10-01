@@ -881,6 +881,20 @@ html[data-theme="light"] .store-kpi-card.active .store-kpi-index,
 html[data-theme="light"] .store-kpi-card.active .store-kpi-label{color:#B45309}
 .store-kpi-value{font:600 21px var(--display);color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .store-kpi-sub{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Mini gráfico de cada tarjeta (ver sparklineSvg/sparkStackSvg en app.js). Va pegado abajo con
+   margin-top:auto para que las seis tarjetas apoyen su curva a la misma altura aunque el texto de
+   arriba ocupe una línea más en alguna. El color lo pone acá y el SVG lo toma con currentColor. */
+.store-kpi-spark{display:block;margin-top:auto;padding-top:8px;color:var(--muted);line-height:0}
+.store-kpi-card.active .store-kpi-spark{color:var(--coral)}
+.store-kpi-card:hover .store-kpi-spark{color:#7D9BBD}
+.store-kpi-card.active:hover .store-kpi-spark{color:var(--coral)}
+.store-kpi-spark .spark{display:block;width:100%;height:28px;overflow:visible}
+.spark-area{fill:currentColor;opacity:.15;stroke:none}
+.spark-line{fill:none;stroke:currentColor;stroke-width:1.75;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+/* Barra apilada de "Medios de pago": el mismo color en dos intensidades en vez de dos colores
+   nuevos, así no hay que elegir una paleta aparte para el tema claro. */
+.spark-seg-a{fill:currentColor;opacity:.85}
+.spark-seg-b{fill:currentColor;opacity:.3}
 @media(max-width:900px){.store-kpi-grid{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)}}
 @media(max-width:560px){.store-kpi-grid{grid-template-columns:1fr;grid-template-rows:none}}
 

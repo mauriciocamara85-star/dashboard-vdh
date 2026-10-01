@@ -2209,7 +2209,7 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   const projection=sumEntityProjections(allMonthRows,row=>row.Local);
   const daily=storeDailySeries(rows);
   const kpiCtx={a,ratio,avgConv,avgConvObj,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection};
-  renderStoreKpiGrid(kpiCtx);
+  renderStoreKpiGrid(kpiCtx,daily);
   renderStoreChart(daily,kpiCtx);
 
   renderTrafficFunnel('storeFunnel',rows.length>0,a.traffic,avgConv);
@@ -2306,9 +2306,59 @@ const STORE_KPI_META={
   trafico:{kicker:'TRÁFICO',heading:'Flujo diario de personas'},
   pagos:{kicker:'MEDIOS DE PAGO',heading:'Desglose financiero'}
 };
-function renderStoreKpiGrid(ctx){
+// Mini gráfico dentro de la propia tarjeta: la tendencia se ve sin tener que clickear para abrir el
+// gráfico grande. Sale de la MISMA serie diaria que alimenta ese gráfico (storeDailySeries), así que
+// no hay forma de que digan cosas distintas.
+//
+// No lleva color propio: pinta con currentColor y lo decide el CSS (apagado en reposo, naranja en la
+// tarjeta activa). Hardcodear un color por métrica obligaría a repetir los seis en el tema claro,
+// que es justo donde ya se habían vuelto ilegibles el índice y el label de la tarjeta activa.
+//
+// preserveAspectRatio="none" estira el viewBox a lo ancho de la tarjeta; la línea lleva
+// vector-effect="non-scaling-stroke" para no engordar con ese estirón. Por eso tampoco hay punto
+// final: un círculo en un SVG estirado sale ovalado.
+function sparklineSvg(valores){
+  const pts=valores.filter(v=>v!==null&&v!==undefined&&!Number.isNaN(v)&&Number.isFinite(v));
+  if(pts.length<2)return'';
+  const w=100,h=28,min=Math.min(...pts),max=Math.max(...pts),span=(max-min)||1;
+  // Métrica que no se movió en todo el período: la línea va al medio. Con la fórmula de abajo
+  // quedaría apoyada contra el piso del recuadro, que se lee como "cayó a cero" y no como "plana".
+  const plana=max===min;
+  const x=i=>i/(pts.length-1)*w,y=v=>plana?h/2:h-2-((v-min)/span)*(h-5);
+  const linea=pts.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`+
+    `<path class="spark-area" d="${linea} L${w} ${h} L0 ${h} Z"></path>`+
+    `<path class="spark-line" d="${linea}"></path></svg>`;
+}
+// "Medios de pago" no es una serie en el tiempo sino un reparto, así que en vez de una curva va una
+// barra apilada: de un vistazo se ve cuánto pesa el efectivo contra la tarjeta.
+function sparkStackSvg(partes){
+  const total=partes.reduce((s,p)=>s+Math.max(0,p.valor),0);
+  if(!total)return'';
+  let x=0;
+  const segmentos=partes.map(p=>{
+    const ancho=Math.max(0,p.valor)/total*100;
+    const rect=`<rect class="${p.cls}" x="${x.toFixed(2)}" y="9" width="${ancho.toFixed(2)}" height="10"></rect>`;
+    x+=ancho;return rect;
+  }).join('');
+  return `<svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">${segmentos}</svg>`;
+}
+function renderStoreKpiGrid(ctx,daily){
   const{a,ratio,avgConv,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection}=ctx;
   qa('#storeKpiGrid .store-kpi-card').forEach(btn=>btn.classList.toggle('active',btn.dataset.storeMetric===state.storeMetric));
+
+  // La proyección no tiene serie propia: lo que se grafica es la venta ACUMULADA, que es la curva
+  // que después se extiende hasta el cierre del mes en el gráfico grande.
+  const serie=daily||[];
+  let acum=0;
+  const acumulado=serie.map(d=>(acum+=d.actual));
+  const spark=(metrica,html)=>{const el=$(`storeKpiSpark-${metrica}`);if(el)el.innerHTML=html||''};
+  spark('venta',sparklineSvg(serie.map(d=>d.actual)));
+  spark('proyeccion',sparklineSvg(acumulado));
+  spark('conversion',sparklineSvg(serie.map(d=>d.conversion)));
+  spark('ticket',sparklineSvg(serie.map(d=>d.ticket)));
+  spark('trafico',sparklineSvg(serie.map(d=>d.traffic)));
+  spark('pagos',hasPayment?sparkStackSvg([{valor:avgCash,cls:'spark-seg-a'},{valor:avgCard,cls:'spark-seg-b'}]):'');
 
   $('storeKpiValue-venta').textContent=money(a.actual);
   // "X% del objetivo a la fecha" (no "X% de avance del mes"): esto compara contra lo esperado A LA
