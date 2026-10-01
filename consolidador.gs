@@ -777,7 +777,5 @@ function onOpen() {
     .createMenu('🔄 VDH')
     .addItem('Consolidar ahora', 'consolidar')
     .addItem('Mandar resumen ahora (prueba)', 'enviarResumenDiario')
-    .addSeparator()
-    .addItem('Activar automático', 'activarAutomatico')
     .addToUi();
 }
