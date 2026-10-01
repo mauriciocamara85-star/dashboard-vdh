@@ -183,7 +183,16 @@ function semesterBounds(dateStr){
 function fillFilters(){const locals=[...new Set([...allRows('LOCAL_DIARIO'),...allRows('VENDEDOR_SEMANAL')].map(r=>r.Local).filter(Boolean))].sort();const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;$('localFilter').innerHTML=option('all','Todos los locales')+locals.map(x=>option(x,x)).join('');fillSellerFilter();fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter')}
 function fillSellerFilter(){const local=$('localFilter').value;const sellers=[...new Set([...allRows('VENDEDOR_SEMANAL'),...allRows('VENDEDOR_DIARIO')].filter(row=>local==='all'||String(row.Local??'')===local).map(r=>r.Vendedor).filter(Boolean))].sort();const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;const previous=$('sellerFilter').value;$('sellerFilter').innerHTML=option('all','Todos los vendedores')+sellers.map(x=>option(x,x)).join('');$('sellerFilter').value=sellers.includes(previous)?previous:'all'}
 function fillSellerWeeks(){const month=$('sellerMonthFilter').value;const weeks=[...new Set(allRows('VENDEDOR_SEMANAL').filter(row=>month==='all'||String(row.Mes??'')===month).map(row=>row.Semana).filter(v=>v!==undefined&&v!==null))].sort((a,b)=>Number(a)-Number(b));const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;$('sellerWeekFilter').innerHTML=option('all','Todas las semanas')+weeks.map(x=>option(x,`Semana ${x}`)).join('');}
-function updatePeriod(){$('periodBadge').textContent=$('fromDate').value||$('toDate').value?`${$('fromDate').value||'inicio'} → ${$('toDate').value||'hoy'}`:'Semestre completo'}
+// Cartel de la derecha del título: qué período se está mirando, en dd/mm y con el nombre del preset
+// si hay uno ("Mes actual · 01/10 → 15/10"). Antes mostraba las fechas crudas en ISO
+// (2026-10-01 → 2026-10-01), que pasó a verse siempre al arrancar el dashboard en el mes actual.
+function updatePeriod(){
+  const from=$('fromDate').value,to=$('toDate').value;
+  if(!from&&!to){$('periodBadge').textContent='Semestre completo';return}
+  const rango=from&&from===to?formatDateShortAR(from):`${from?formatDateShortAR(from):'inicio'} → ${to?formatDateShortAR(to):'hoy'}`;
+  const preset=periodPicker.preset,nombre=['hoy','ayer','semana','mes','trimestre'].includes(preset)?periodPresetLabel(preset):'';
+  $('periodBadge').textContent=nombre?`${nombre} · ${rango}`:rango;
+}
 function todayKey(){const today=new Date();return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`}
 function lastLoadedDate(name){const rows=state.tables[name]||[];const dates=rows.filter(row=>num(row,'Venta real')||num(row,'Tráfico real')||num(row,'Ticket prom.')).map(row=>normalizeDate(row.Fecha)).filter(Boolean).sort();return dates.length?dates[dates.length-1]:''}
 function objectiveCutoff(){return $('toDate').value||lastLoadedDate('LOCAL_DIARIO')||todayKey()}
@@ -3016,11 +3025,15 @@ function periodPresetLabel(preset){
   if(preset==='semana')return'Semana actual';
   if(preset==='mes')return'Mes actual';
   if(preset==='trimestre')return'Trimestre actual';
-  // 'custom' (elegido a mano en "Período seleccionado") y 'all' (estado inicial, sin filtro) se
-  // muestran igual acá — "Personalizado" pasó a ser el estado implícito de "Período" cada vez que
-  // NO hay un preset fijo activo, en vez del texto aparte "Semestre completo" que tenía antes.
+  if(preset==='semestre')return'Semestre completo';
+  // 'custom': el rango elegido a mano en "Período seleccionado".
   return'Personalizado';
 }
+// El período con el que arranca el dashboard y al que vuelve "Limpiar todo" (pedido 2026-10-01).
+// Antes arrancaba sin filtro —el semestre entero— y eso mezclaba meses: es lo que hizo que el
+// Resumen general mostrara 111% de un objetivo de octubre con la venta de septiembre adentro. El
+// semestre sigue a un click, como preset propio ("Semestre completo").
+const PERIODO_POR_DEFECTO='mes';
 function openPeriodDropdown(){$('periodDropdown').hidden=false}
 function closePeriodDropdown(){$('periodDropdown').hidden=true}
 function openCalendarDropdown(){$('periodCalendarDropdown').hidden=false;if(!periodPicker.fp)initFlatpickr()}
@@ -3029,7 +3042,12 @@ function markActivePreset(preset){qa('.period-preset').forEach(btn=>btn.classLis
 // Presets "actuales" son a la fecha (desde el inicio de la semana/mes/trimestre HASTA hoy, no el
 // período completo) — mismo criterio que "Semana actual"/"Mes actual"/"Trimestre actual" de
 // Tiendanube, que muestran lo acumulado corrido, no un período futuro vacío.
-function applyPeriodPreset(preset){
+// "semestre" (y cualquier otro valor) deja las dos fechas vacías: sin filtro de fecha, que es como
+// el resto del dashboard entiende "semestre completo".
+//
+// `disparar` en false escribe las fechas SIN el evento 'change': al arrancar los datos todavía no
+// llegaron, y ese evento llama a render() con las tablas vacías. loadData() renderiza después.
+function applyPeriodPreset(preset,disparar=true){
   const today=todayKey();
   let from='',to='';
   if(preset==='hoy'){from=to=today}
@@ -3038,22 +3056,22 @@ function applyPeriodPreset(preset){
   else if(preset==='mes'){from=firstOfMonthKey(today);to=today}
   else if(preset==='trimestre'){from=firstOfQuarterKey(today);to=today}
   periodPicker.preset=preset;
-  setPeriodInputs(from,to);
+  if(disparar)setPeriodInputs(from,to);
+  // Sin el 'change' tampoco corre render(), que es quien actualiza el cartel del período: se hace a
+  // mano para que mientras cargan los datos no diga "Semestre completo" con el mes ya elegido.
+  else{$('fromDate').value=from;$('toDate').value=to;updatePeriod()}
   $('periodPickerBtnText').textContent=periodPresetLabel(preset);
   markActivePreset(preset);
   closeCalendarDropdown();
   closePeriodDropdown();
 }
+// "Limpiar todo" vuelve al período por defecto (el mes actual), no a "sin filtro": limpiar es volver
+// a como arranca el dashboard. Para ver el semestre está su preset.
 function resetPeriodPicker(){
-  periodPicker.preset='all';
-  setPeriodInputs('','');
-  $('periodPickerBtnText').textContent=periodPresetLabel('all');
   $('periodCustomBtnText').textContent='Elegí un rango';
-  markActivePreset('');
   if(periodPicker.fp)periodPicker.fp.clear();
   refreshCustomSelectedLabel([]);
-  closePeriodDropdown();
-  closeCalendarDropdown();
+  applyPeriodPreset(PERIODO_POR_DEFECTO);
 }
 // "Período seleccionado" (campo 2) muestra el rango elegido a medida que se clickea el calendario,
 // ANTES de confirmar con "Aplicar" — separado del botón del campo, que solo se actualiza al aplicar
@@ -3183,6 +3201,7 @@ $('mainDrawerClose').addEventListener('click',closeMainDrawer);
 $('mainDrawerBackdrop').addEventListener('click',closeMainDrawer);
 qa('.drawer-item[data-drawer-view]').forEach(btn=>btn.addEventListener('click',()=>{switchView(btn.dataset.drawerView);closeMainDrawer()}));
 initPeriodPicker();
+applyPeriodPreset(PERIODO_POR_DEFECTO,false);
 scheduleRefresh();loadData();
 
 // Detecta cuando hay una versión nueva del sitio ya publicada (el SW la baja solo en segundo
