@@ -1636,20 +1636,29 @@ function renderOverview(){
   // Split Locales/Online para "Resumen ejecutivo" — a nivel de canal, prorrateado a la fecha igual
   // que `a` (mismo criterio que el resto de esta función, no el objetivo de MES completo).
   const aLocalCh=aggregate(localRows),aEcomCh=aggregate(ecomRows);
-  const days=[...new Set(rows.map(r=>normalizeDate(r.Fecha)).filter(Boolean))].sort();
 
   const daily=dailySeries(rows),cumulative=cumulativeSeries(daily);
   const lastIdx=daily.length-1,prevIdx=lastIdx-1;
   const yesterdayCum=prevIdx>=0?cumulative[prevIdx]:null;
 
-  // % Avance del mes / Ritmo Necesario / Cierre Estimado comparten una misma base: el objetivo del
-  // MES completo (no el prorrateado a la fecha que muestra "Objetivo a la fecha") — monthContext()
-  // ya arma esto una sola vez para no recalcularlo 3 veces con la misma lógica.
+  // Ritmo Necesario y Cierre Estimado se miden contra el objetivo del MES completo — monthContext()
+  // lo arma una sola vez para no repetir la misma lógica en cada tarjeta.
   const{localMonth,monthRows,monthTarget}=monthContext();
-  const avanceMesRatio=monthTarget?a.actual/monthTarget*100:null;
-  const avanceMesAyer=(monthTarget&&yesterdayCum&&yesterdayCum.ratio!==null)?yesterdayCum.actual/monthTarget*100:null;
-  const avanceMesDelta=(avanceMesRatio!==null&&avanceMesAyer!==null)?avanceMesRatio-avanceMesAyer:null;
-  const avanceMesTrend=kpiTrendRow(avanceMesDelta,avanceMesDelta!==null?`${avanceMesDelta>=0?'+':''}${avanceMesDelta.toFixed(1)} pts vs. cierre de ayer`:'sin cierre de ayer para comparar');
+
+  // Lo que se mide "del mes" necesita numerador Y denominador del MISMO mes.
+  //
+  // Hasta el 30/09 el numerador era `a.actual` —la venta de TODO el período que muestre el filtro—
+  // contra monthTarget, que es el objetivo de un mes solo. Mientras el semestre tuvo un único mes
+  // cargado los dos coincidían y nadie lo notó. El 01/10, con septiembre y octubre cargados, pasó a
+  // dividir $272.986.289 (sept + 1 día de oct) por el objetivo de octubre ($245.891.998): 111% de
+  // avance, "faltan $0", "Ritmo necesario $0/día" y el cartel verde de "el ritmo ya cubre lo
+  // necesario" — cuando octubre llevaba $119.000 vendidos y le faltaban $245,8 millones.
+  //
+  // Estas series salen SOLO del mes en curso, sin importar qué período muestre el filtro de arriba.
+  const monthDaily=dailySeries(rowsThroughToday(monthRows)),monthCum=cumulativeSeries(monthDaily);
+  const monthLastIdx=monthDaily.length-1,monthPrevIdx=monthLastIdx-1;
+  const monthActual=monthLastIdx>=0?monthCum[monthLastIdx].actual:0;
+  const monthDias=monthDaily.length;
 
   // Ritmo necesario: cuánto hace falta vender por día, en lo que resta del MES calendario, para
   // alcanzar el objetivo total del mes — (Objetivo Mes - Venta Real) / Días Restantes. Antes se
@@ -1659,10 +1668,10 @@ function renderOverview(){
   const diasEnMes=daysInCalendarMonth(objectiveCutoff());
   const ritmoAt=cutIdx=>{
     if(cutIdx<0||!monthTarget)return null;
-    const c=cumulative[cutIdx],transcurridos=cutIdx+1,restantes=Math.max(1,diasEnMes-transcurridos);
+    const c=monthCum[cutIdx],transcurridos=cutIdx+1,restantes=Math.max(1,diasEnMes-transcurridos);
     return Math.max(0,monthTarget-c.actual)/restantes;
   };
-  const ritmoHoy=ritmoAt(lastIdx),ritmoAyer=ritmoAt(prevIdx);
+  const ritmoHoy=ritmoAt(monthLastIdx),ritmoAyer=ritmoAt(monthPrevIdx);
   const ritmoDelta=(ritmoHoy!==null&&ritmoAyer!==null)?ritmoHoy-ritmoAyer:null;
   // La flecha usa invert=true (menos ritmo necesario = mejora), pero el signo +/- del texto tiene
   // que acompañar a ESA flecha ya invertida, no al signo crudo de ritmoDelta — antes podía mostrar
@@ -1670,8 +1679,8 @@ function renderOverview(){
   // es el mismo valor que trendMeta ya usa puertas adentro para decidir la flecha.
   const ritmoDisplaySign=ritmoDelta!==null?-ritmoDelta:null;
   const ritmoTrend=kpiTrendRow(ritmoDelta,ritmoDisplaySign!==null?`${ritmoDisplaySign>=0?'+':''}${money(ritmoDisplaySign)} vs. ritmo de ayer`:'sin cierre de ayer para comparar',true);
-  const diasRestantes=Math.max(1,diasEnMes-days.length);
-  const restanteMes=monthTarget?Math.max(0,monthTarget-a.actual):null;
+  const diasRestantes=Math.max(1,diasEnMes-monthDias);
+  const restanteMes=monthTarget?Math.max(0,monthTarget-monthActual):null;
   const ritmoNecesario=restanteMes!==null?restanteMes/diasRestantes:null;
 
   // Cierre estimado: suma la proyección ponderada propia de cada local + la de e-commerce (ver
@@ -1692,11 +1701,24 @@ function renderOverview(){
   const ratioHoy=a.target?a.actual/a.target:0,deltaHoy=a.actual-a.target;
   const desvioBadge=kpiTrendRow(deltaHoy,deltaHoy>=0?'Por encima del esperado':'Por debajo del esperado');
 
+  // Card 1 lee el objetivo primero y la venta debajo: la pregunta es "cuánto hay que hacer" y recién
+  // después "cuánto llevo". Habla del PERÍODO que se está mirando —igual que el gráfico, Card 2 y el
+  // Resumen ejecutivo—, no del mes calendario, que ya tienen Ritmo necesario y Cierre estimado.
+  const cumplAyer=(yesterdayCum&&yesterdayCum.ratio!==null)?yesterdayCum.ratio:null;
+  const cumplDelta=(a.target&&cumplAyer!==null)?ratioHoy*100-cumplAyer:null;
+  const cumplTrend=kpiTrendRow(cumplDelta,cumplDelta!==null?`${cumplDelta>=0?'+':''}${cumplDelta.toFixed(1).replace('.',',')} pts vs. cierre de ayer`:'sin cierre de ayer para comparar');
+  const desvioPct=a.target?(ratioHoy-1)*100:null;
+  const cumplDetalle=a.target
+    ?`Venta real ${money(a.actual)} · <span class="${deltaHoy>=0?'good':'bad'}">${desvioPct>=0?'+':''}${percent(desvioPct)}</span>`
+    :'Sin objetivo cargado para este período';
+
   // Las 4 tarjetas: una sola métrica grande por tarjeta, sin pisarse entre sí — cada una responde
   // una pregunta distinta (venta hoy / desvío a la fecha / ritmo necesario / cierre proyectado).
   $('overviewMetrics').innerHTML=
-    kpiCard('Venta real',money(a.actual),monthTarget?`${percent(avanceMesRatio)} del objetivo total (${money(monthTarget)})`:'Sin objetivo mensual cargado','',avanceMesTrend,null)+
-    kpiCard('Desvío a la fecha',`<span class="${deltaHoy>=0?'good':'bad'}">${deltaHoy>=0?'+':''}${money(deltaHoy)}</span>`,`Esperado a hoy: ${money(a.target)} (${percent(ratioHoy*100)} de cumplimiento)`,'',desvioBadge,null)+
+    kpiCard('Objetivo a la fecha',money(a.target),cumplDetalle,'',cumplTrend,null)+
+    // El monto esperado ya lo encabeza Card 1, así que acá no se repite: esta tarjeta aporta la
+    // brecha en pesos, que es lo único que no se lee en ninguna otra.
+    kpiCard('Desvío a la fecha',`<span class="${deltaHoy>=0?'good':'bad'}">${deltaHoy>=0?'+':''}${money(deltaHoy)}</span>`,a.target?`${percent(ratioHoy*100)} de cumplimiento a la fecha`:'Sin objetivo cargado para este período','',desvioBadge,null)+
     kpiCard('Ritmo necesario',ritmoNecesario!==null?`${money(ritmoNecesario)} /día`:'—',restanteMes!==null?`${diasRestantes} día${diasRestantes===1?'':'s'} restantes para cubrir ${money(restanteMes)}`:`${diasRestantes} día${diasRestantes===1?'':'s'} restantes del mes`,'',ritmoTrend,null)+
     kpiCard(`Cierre estimado${localMonth?` · ${localMonth}`:''}`,proj?money(proj.ponderada):'—',proj?`Lineal: ${money(proj.lineal)} · ${proj.diasRestantes} días restantes`:'Sin días cargados todavía','',cierreTrend,null);
 
@@ -1708,7 +1730,7 @@ function renderOverview(){
   // que esté graficando el chart en sí (que puede ser el semestre completo): esto siempre habla del
   // mes calendario en curso. avgDailyProy sale del mismo cálculo ponderado que ya arma "Cierre
   // estimado" (reversión de ponderada=actual+ritmo*diasRestantes), no un promedio nuevo por su cuenta.
-  const monthProgressCtx={monthTarget,diasEnMes,diasTranscurridos:days.length,avgDailyReal:days.length?a.actual/days.length:null,avgDailyProy:proj?(proj.ponderada-proj.actual)/Math.max(1,proj.diasRestantes):null};
+  const monthProgressCtx={monthTarget,diasEnMes,diasTranscurridos:monthDias,avgDailyReal:monthDias?monthActual/monthDias:null,avgDailyProy:proj?(proj.ponderada-proj.actual)/Math.max(1,proj.diasRestantes):null};
   safeRender(renderBars,rows,monthProgressCtx);
   safeRender(renderDailyComparison,daily);
   // "Resumen Ejecutivo" ya no repite Faltante/Ritmo necesario (idénticos a las Cards 2/3 de arriba,
@@ -2106,14 +2128,18 @@ function monthTargetTotal(){return monthContext().monthTarget}
 // 4 filas apiladas a todo el ancho (ver CSS #deviationCard/.resumen-row), cada una flex:1 salvo el
 // banner final, para llenar la altura completa del panel sin huecos.
 function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
-  const channelRow=(label,a)=>{
+  // `baseLocales` solo lo recibe la fila de Online: cuánto pesa el canal sobre la venta de los
+  // locales. Va acá y no en una tarjeta propia porque es la relación entre las dos filas que este
+  // panel ya muestra una debajo de la otra.
+  const channelRow=(label,a,baseLocales)=>{
     const hasTarget=a.target>0,ratio=hasTarget?a.actual/a.target:0;
     const tone=hasTarget?statusTone(ratio):'';
-    const detail=hasTarget?`${percent(ratio*100)} de su objetivo (${moneyShort(a.target)})`:'Sin objetivo cargado';
-    return `<div class="resumen-row"><span class="section-kicker">${label}</span><div class="deviation-number ${tone}">${money(a.actual)}</div><div class="deviation-copy">${detail}</div></div>`;
+    const partes=[hasTarget?`${percent(ratio*100)} de su objetivo (${moneyShort(a.target)})`:'Sin objetivo cargado'];
+    if(baseLocales>0)partes.push(`${percent(a.actual/baseLocales*100)} de la venta de locales`);
+    return `<div class="resumen-row"><span class="section-kicker">${label}</span><div class="deviation-number ${tone}">${money(a.actual)}</div><div class="deviation-copy">${partes.join(' · ')}</div></div>`;
   };
   const rowLocales=channelRow('LOCALES',aLocalCh);
-  const rowOnline=channelRow('ONLINE',aEcomCh);
+  const rowOnline=channelRow('ONLINE',aEcomCh,aLocalCh.actual);
 
   // Canal a empujar: el que tenga mayor brecha de puntos vs. su propio objetivo (no en $, para poder
   // comparar dos objetivos de tamaño distinto). Si a alguno le falta objetivo cargado, no hay foco
