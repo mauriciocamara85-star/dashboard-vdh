@@ -524,7 +524,11 @@ function renderStoreBreakdown(rows){
 
   const cols=[['Local','local'],['Total','bruto'],['Descuentos','descuentos'],['% Desc.','pctDiscount'],
     ['Efectivo','efectivo'],['Tarjeta','tarjeta'],['% Efec.','pctCash'],['% Tarj.','pctCard'],
-    ['Cantidad','prendas'],['Ventas','tickets'],['Vta. fallida','vtaFallida'],['Tráfico','traffic'],
+    // "Q" adelante en las dos columnas que son un CONTEO y no pesos (pedido 2026-10-01): en una
+    // tabla donde Total/Efectivo/Tarjeta están en $, una columna "Ventas" con 433 se lee como plata.
+    // Misma convención que ya usa "Q ventas" en la tabla de e-commerce. Y "Q tickets" en vez de
+    // "Q ventas" porque es lo que mide: operaciones cerradas, el denominador del ticket promedio.
+    ['Q cantidad','prendas'],['Q tickets','tickets'],['Vta. fallida','vtaFallida'],['Tráfico','traffic'],
     ['Conversión','conversion'],['Ticket prom.','ticketProm'],['Producto prom.','productoProm'],['PxT','pxt']];
   const celdas=(r,conSemaforo)=>`<td class="num">${money(r.bruto)}</td><td class="num">${money(r.descuentos)}</td><td class="num">${percent(r.pctDiscount*100)}</td>`+
     `<td class="num">${money(r.efectivo)}</td><td class="num">${money(r.tarjeta)}</td>`+
