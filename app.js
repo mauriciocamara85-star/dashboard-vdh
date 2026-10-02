@@ -718,7 +718,8 @@ function currentWeekRows(){
 // currentWeekRows() crudo a propósito (ver comentario de fusionarVendedoresCompartidos arriba).
 function currentWeekRowsPersonas(){
   const {rows,weekKeys}=currentWeekRows();
-  return {rows:fusionarVendedoresCompartidos(rows),weekKeys};
+  // Con el ajuste manual de la app de Ranking (Sole Lescano, sept S3-S4) aplicado semana por semana.
+  return {rows:fusionarVendedoresCompartidos(rows).map(r=>aplicarAjustesManuales([r],weekKeyOf(r))[0]),weekKeys};
 }
 function showRankingEmpty(){
   $('rankingPeriodBadge').textContent='Sin semana';
@@ -739,7 +740,12 @@ const RANK_CATEGORIES={
 // Los puntos siempre se calculan sobre TODO VENDEDOR_SEMANAL (sin aplicar los filtros de
 // Local/Vendedor de arriba): el puesto que da los puntos es el ranking real de la empresa,
 // no el de un local filtrado. Los filtros solo acotan qué filas se MUESTRAN en la tabla.
-const F1_MAIN_POINTS=[25,18,15,12,10,8,6,4,2,1];
+// 15 puestos que puntúan en la carrera principal de VENDEDORES (25…1 de F1 y después 1 pt parejo
+// hasta el 15º); los locales reparten solo al top 10 (STORE_MAIN_TOP). Igual que la app de Ranking
+// (Ranking VDH/app.js, MAIN_POINTS): el dashboard y la app tienen que dar EXACTAMENTE el mismo
+// campeonato (pedido 2026-10-02). Si cambia una regla, cambiarla en los dos lados.
+const F1_MAIN_POINTS=[25,18,15,12,10,8,6,4,2,1,1,1,1,1,1];
+const STORE_MAIN_TOP=10;
 // Bajado de [8,7,6,5,4,3,2,1] el 2026-09-06, portado desde el repo hermano ranking-vdh (que ya
 // había hecho este cambio el 2026-09-04): con la escala vieja, barrer los 4 sprints (Ticket,
 // Perfumes, Bóxer, PxT) daba hasta 32 pts, más que ganar la Venta de la semana (25 pts la carrera
@@ -756,18 +762,104 @@ function f1AllWeekKeys(){const rows=state.tables.VENDEDOR_SEMANAL||[];return[...
 // (locales) necesita la variante SIN fundir — ver f1WeekRowsCrudo más abajo — porque cada local
 // tiene que ver su propia venta real completa, no la mitad de un vendedor que cubrió dos locales
 // esa semana (mismo criterio que currentWeekRows/currentWeekRowsPersonas, ver esa nota más arriba).
-function f1WeekRows(weekKey){return fusionarVendedoresCompartidos((state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey))}
+function f1WeekRows(weekKey){return aplicarAjustesManuales(fusionarVendedoresCompartidos((state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey)),weekKey)}
 function f1WeekRowsCrudo(weekKey){return(state.tables.VENDEDOR_SEMANAL||[]).filter(r=>weekKeyOf(r)===weekKey)}
 // Empates: si dos personas quedan exactamente igual en % de cumplimiento, la posición (y los
 // puntos F1/Sprint que reparte esa posición) se define por mayor venta/unidad absoluta real y,
 // si también empatan ahí, alfabético — determinístico siempre, nunca "quien cargó primero en la
 // planilla" (Array.sort es estable, pero el orden de origen no tiene ningún criterio de negocio).
+// ── Reglas de clasificación, portadas de la app de Ranking el 2026-10-02 ─────────────────────
+// Hasta acá el dashboard rankeaba sin ninguna de estas reglas y su GP podía dar un campeón distinto
+// del que mostraba la app. Están explicadas en detalle en Ranking VDH/app.js; acá, en corto:
+//
+// MIN_DIAS_CLASIFICA: 3 días con venta en la semana para entrar a puntos. Caso que la originó: una
+//   vendedora trabajó solo un domingo, arrastró un objetivo chico y quedó 1ª con 216%. Rampa a mitad
+//   de semana: se pide la mitad de los días que lleva abierto el local, con techo 3.
+// MIN_TICKETS: 8 tickets en la semana para Ticket y PxT, que son promedios por operación: con
+//   pocas, una venta grande los dispara. Misma rampa, sobre una semana tipo de 6 días.
+// objetivoEfectivo: en Perfumes y Bóxer un objetivo 0 cuenta como 1 unidad; si no, el % no existe
+//   y quien vendió quedaba afuera del ranking.
+// Los que no clasifican NO desaparecen: van al final con su %, sin medalla y sin puntos.
+const MIN_DIAS_CLASIFICA=3;
+const MIN_TICKETS=8;
+const SPRINT_PROMEDIO=['TP','PxT'];
+const SPRINT_UNIDADES=['Perfumes','Boxer'];
+const objetivoEfectivo=(field,obj)=>SPRINT_UNIDADES.includes(field)&&!(obj>0)?1:obj;
+const estaClasificado=p=>p.clasifica!==false;
+// Excepción puntual de la app: semanas 3 y 4 de septiembre, Sole Lescano cubrió domingos en un local
+// sin lugar en la planilla y esa venta quedó a nombre de otra persona. Solo toca lo que rankea
+// PERSONAS (el local ya tiene su venta bien contada). No es un mecanismo para seguir usando.
+const AJUSTES_MANUALES_VENDEDOR=[
+  {weekKey:'Septiembre|4',vendedor:'Sole Lescano',ventaReal:1203999,ventaObj:369685},
+  {weekKey:'Septiembre|3',vendedor:'Sole Lescano',ventaReal:1193500,ventaObj:422497},
+];
+function aplicarAjustesManuales(rows,weekKey){
+  const ajustes=AJUSTES_MANUALES_VENDEDOR.filter(a=>a.weekKey===weekKey);
+  if(!ajustes.length)return rows;
+  return rows.map(row=>{
+    const ajuste=ajustes.find(a=>a.vendedor===row.Vendedor);
+    if(!ajuste)return row;
+    return{...row,'Venta real':num(row,'Venta real')+ajuste.ventaReal,'Venta obj':num(row,'Venta obj')+ajuste.ventaObj};
+  });
+}
+// Días trabajados por persona: días con venta > 0 en VENDEDOR_DIARIO (el consolidador no trae
+// asistencia; el objetivo diario se imputa trabaje o no). Por persona y no por local: quien cubre
+// dos locales el mismo día suma uno. El cache se tira cuando llegan tablas nuevas.
+let diasCache={tablas:null,porSemana:{}};
+function diasTrabajadosDeLaSemana(weekKey){
+  if(diasCache.tablas!==state.tables)diasCache={tablas:state.tables,porSemana:{}};
+  if(diasCache.porSemana[weekKey])return diasCache.porSemana[weekKey];
+  const diasLocal={};
+  (state.tables.LOCAL_DIARIO||[]).filter(r=>weekKeyOf(r)===weekKey).forEach(row=>{
+    if(num(row,'Venta real')<=0)return;
+    const local=row.Local||'';
+    (diasLocal[local]||(diasLocal[local]=new Set())).add(String(row.Fecha??'').slice(0,10));
+  });
+  const porPersona={};
+  (state.tables.VENDEDOR_DIARIO||[]).filter(row=>weekKeyOf(row)===weekKey).forEach(row=>{
+    const nombre=row.Vendedor;
+    if(!nombre)return;
+    const p=porPersona[nombre]||(porPersona[nombre]={dias:new Set(),locales:new Set()});
+    p.locales.add(row.Local||'');
+    if(num(row,'Venta real')>0)p.dias.add(String(row.Fecha??'').slice(0,10));
+  });
+  const resultado={};
+  Object.entries(porPersona).forEach(([nombre,p])=>{
+    const abiertos=Math.max(0,...[...p.locales].map(local=>diasLocal[local]?diasLocal[local].size:0));
+    const minimo=abiertos?Math.min(MIN_DIAS_CLASIFICA,Math.max(1,Math.ceil(abiertos/2))):MIN_DIAS_CLASIFICA;
+    resultado[nombre]={dias:p.dias.size,abiertos,minimo,clasifica:p.dias.size>=minimo};
+  });
+  diasCache.porSemana[weekKey]=resultado;
+  return resultado;
+}
+// Sin fila diaria se clasifica igual: la regla nunca saca a nadie por FALTA de datos.
+function infoDiasDe(weekKey,nombre){return diasTrabajadosDeLaSemana(weekKey)[nombre]||{dias:null,abiertos:0,minimo:MIN_DIAS_CLASIFICA,clasifica:true}}
+function ticketsDe(row){const tp=num(row,'TP real');return tp>0?Math.round(num(row,'Venta real')/tp):null}
+function umbralTicketsDe(abiertos){return abiertos?Math.max(1,Math.ceil(MIN_TICKETS*Math.min(abiertos,6)/6)):MIN_TICKETS}
 function f1RatioStandings(weekKey,field){
   const realKey=field?`${field} real`:'Venta real',objKey=field?`${field} obj`:'Venta obj';
-  const list=f1WeekRows(weekKey).map(row=>{const real=num(row,realKey),obj=num(row,objKey);return{local:row.Local,name:row.Vendedor,real,obj,ratio:obj?real/obj*100:null}}).filter(p=>p.ratio!==null);
-  list.sort((a,b)=>(b.ratio-a.ratio)||(b.real-a.real)||String(a.name).localeCompare(String(b.name),'es'));
+  const list=f1WeekRows(weekKey).map(row=>{
+    const real=num(row,realKey),obj=objetivoEfectivo(field,num(row,objKey)),info=infoDiasDe(weekKey,row.Vendedor);
+    const esPromedio=SPRINT_PROMEDIO.includes(field);
+    const tickets=esPromedio?ticketsDe(row):null,minTickets=esPromedio?umbralTicketsDe(info.abiertos):null;
+    const faltanTickets=tickets!==null&&tickets<minTickets;
+    // Sin venta en la semana no hay nada inflado que corregir: no se lo etiqueta.
+    const clasifica=(info.clasifica&&!faltanTickets)||real<=0;
+    const motivoNC=clasifica?null:(info.clasifica?'tickets':'dias');
+    return{local:row.Local,name:row.Vendedor,real,obj,ratio:obj?real/obj*100:null,
+      dias:info.dias,diasAbiertos:info.abiertos,minDias:info.minimo,tickets,minTickets,motivoNC,clasifica};
+  }).filter(p=>p.ratio!==null);
+  list.sort((a,b)=>(estaClasificado(b)-estaClasificado(a))||(b.ratio-a.ratio)||(b.real-a.real)||String(a.name).localeCompare(String(b.name),'es'));
   return list;
 }
+// Etiqueta de la fila: por qué no clasifica, o "3 de 6 días" si clasificó sin la semana completa.
+function ncTagHtml(p){
+  if(p.motivoNC==='tickets')return`<span class="rank-days nc">${p.tickets} ticket${p.tickets===1?'':'s'} · mínimo ${p.minTickets}</span>`;
+  if(!p.dias||!p.diasAbiertos)return'';
+  if(estaClasificado(p)&&p.dias>=p.diasAbiertos)return'';
+  return`<span class="rank-days${estaClasificado(p)?'':' nc'}">${p.dias} de ${p.diasAbiertos} día${p.diasAbiertos===1?'':'s'}${estaClasificado(p)?'':` · mínimo ${p.minDias}`}</span>`;
+}
+const rankPosNC='<span class="rank-pos rank-pos-nc">NC</span>';
 function buildGrandPrixStandings(){
   const weeks=f1AllWeekKeys();
   if(!weeks.length)return{list:[],month:null,weeks:[]};
@@ -781,9 +873,9 @@ function buildGrandPrixStandings(){
   // mes para mostrarla en la tabla (bug real, auditoría 2026-09-05).
   const ensure=name=>{if(!totals[name])totals[name]={name,locales:new Set(),main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[name]};
   monthWeeks.forEach(weekKey=>{
-    f1RatioStandings(weekKey,null).slice(0,10).forEach((p,i)=>{const e=ensure(p.name);e.main+=F1_MAIN_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
+    f1RatioStandings(weekKey,null).filter(estaClasificado).slice(0,F1_MAIN_POINTS.length).forEach((p,i)=>{const e=ensure(p.name);e.main+=F1_MAIN_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
     Object.entries(F1_SPRINT_FIELDS).forEach(([cat,field])=>{
-      f1RatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.name);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
+      f1RatioStandings(weekKey,field).filter(estaClasificado).slice(0,F1_SPRINT_POINTS.length).forEach((p,i)=>{const e=ensure(p.name);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
     });
   });
   const list=Object.values(totals).map(e=>({...e,local:[...e.locales].sort().join(' + '),total:e.main+e.sprint}));
@@ -841,7 +933,7 @@ function aggregateStoreMetricForWeek(weekKey,field){
 // venta/unidad real y, si también empata, alfabético).
 function storeRatioStandings(weekKey,field){
   const agg=aggregateStoreMetricForWeek(weekKey,field);
-  const list=Object.entries(agg).map(([local,g])=>({local,real:g.real,obj:g.obj,ratio:g.obj?g.real/g.obj*100:null})).filter(p=>p.ratio!==null);
+  const list=Object.entries(agg).map(([local,g])=>{const obj=objetivoEfectivo(field,g.obj);return{local,real:g.real,obj,ratio:obj?g.real/obj*100:null}}).filter(p=>p.ratio!==null);
   list.sort((a,b)=>(b.ratio-a.ratio)||(b.real-a.real)||String(a.local).localeCompare(String(b.local),'es'));
   return list;
 }
@@ -853,7 +945,7 @@ function buildStoreChampionship(){
   const totals={};
   const ensure=local=>{if(!totals[local])totals[local]={local,main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[local]};
   monthWeeks.forEach(weekKey=>{
-    storeRatioStandings(weekKey,null).slice(0,10).forEach((p,i)=>{ensure(p.local).main+=F1_MAIN_POINTS[i]});
+    storeRatioStandings(weekKey,null).slice(0,STORE_MAIN_TOP).forEach((p,i)=>{ensure(p.local).main+=F1_MAIN_POINTS[i]});
     Object.entries(F1_SPRINT_FIELDS).forEach(([cat,field])=>{
       storeRatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.local);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i]});
     });
@@ -1005,7 +1097,7 @@ function renderRankStoreCategory(storeCategory){
   const leader=list[0];
   const avgRatio=list.reduce((sum,p)=>sum+p.ratio,0)/list.length;
   const totalReal=list.reduce((sum,p)=>sum+p.real,0);
-  const pointsTable=cfg.field?F1_SPRINT_POINTS:F1_MAIN_POINTS;
+  const pointsTable=cfg.field?F1_SPRINT_POINTS:F1_MAIN_POINTS.slice(0,STORE_MAIN_TOP);
 
   $('storeRankMetrics').innerHTML=
     metricsCard('Locales rankeados',number(list.length),'con objetivo cargado esta semana')+
@@ -1305,11 +1397,17 @@ function renderRankMejora(){
 
   const list=Object.values(byPerson).filter(p=>p.actual).map(p=>{
     const actualRatio=ratioOf(p.actual),prevRatio=p.previo?ratioOf(p.previo):null;
-    const mejora=(actualRatio!==null&&prevRatio!==null)?actualRatio-prevRatio:null;
-    return{...p,local:p.actual.Local,actualRatio,prevRatio,mejora};
+    const info=infoDiasDe(currentKey,p.name);
+    // Igual que la app: la mejora necesita DOS semanas válidas. Contra una semana que no clasificó
+    // (1 día y 216%) el delta no mide nada, y la semana siguiente regalaría una "mejora" enorme.
+    const baseValida=!p.previo||infoDiasDe(prevKey,p.name).clasifica;
+    const mejora=(actualRatio!==null&&prevRatio!==null&&baseValida)?actualRatio-prevRatio:null;
+    return{...p,local:p.actual.Local,actualRatio,prevRatio,mejora,baseValida,
+      dias:info.dias,diasAbiertos:info.abiertos,minDias:info.minimo,clasifica:info.clasifica||!(actualRatio>0)};
   });
 
   list.sort((a,b)=>{
+    if(estaClasificado(a)!==estaClasificado(b))return estaClasificado(b)-estaClasificado(a);
     if(a.mejora!==null&&b.mejora!==null){if(b.mejora!==a.mejora)return b.mejora-a.mejora}
     else if(a.mejora!==null)return -1;
     else if(b.mejora!==null)return 1;
@@ -1318,7 +1416,7 @@ function renderRankMejora(){
     return String(a.name).localeCompare(String(b.name),'es');
   });
 
-  const withMejora=list.filter(p=>p.mejora!==null);
+  const withMejora=list.filter(p=>p.mejora!==null&&estaClasificado(p));
   const enMejora=withMejora.filter(p=>p.mejora>0).length;
   const avgMejora=withMejora.length?withMejora.reduce((sum,p)=>sum+p.mejora,0)/withMejora.length:0;
   const top=withMejora[0];
@@ -1334,9 +1432,9 @@ function renderRankMejora(){
     :'';
 
   const body=list.map((p,i)=>{
-    const mejoraCell=p.mejora!==null?`<span class="${p.mejora>=0?'positive':'negative'}">${p.mejora>=0?'+':''}${p.mejora.toFixed(1)} pts</span>`:'<span class="missing-value">Primera semana</span>';
+    const mejoraCell=p.mejora!==null?`<span class="${p.mejora>=0?'positive':'negative'}">${p.mejora>=0?'+':''}${p.mejora.toFixed(1)} pts</span>`:`<span class="missing-value">${p.previo&&!p.baseValida?'Semana anterior no clasificó':'Primera semana'}</span>`;
     const trend=p.mejora===null?'—':p.mejora>0?'<span class="trend-up">▲</span>':p.mejora<0?'<span class="trend-down">▼</span>':'<span class="trend-flat">■</span>';
-    return `<tr><td class="num">${rankPos(i)}</td><td class="seller-name">${escapeHtml(p.name)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${p.actualRatio!==null?percent(p.actualRatio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.prevRatio!==null?percent(p.prevRatio):'—'}</td><td class="num">${mejoraCell}</td><td class="num">${trend}</td></tr>`;
+    return `<tr${estaClasificado(p)?'':' class="rank-row-nc"'}><td class="num">${estaClasificado(p)?rankPos(i):rankPosNC}</td><td class="seller-name">${escapeHtml(p.name)}${ncTagHtml(p)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${p.actualRatio!==null?percent(p.actualRatio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.prevRatio!==null?percent(p.prevRatio):'—'}</td><td class="num">${mejoraCell}</td><td class="num">${trend}</td></tr>`;
   }).join('');
 
   $('rankingTable').innerHTML=list.length?
@@ -1347,24 +1445,24 @@ function renderRankMejora(){
 function renderRankCategory(category){
   const cfg=RANK_CATEGORIES[category];
   const mode=cfg.sortable?state.rankSortMode:cfg.mode;
-  const {rows,weekKeys}=currentWeekRowsPersonas();
+  const {weekKeys}=currentWeekRowsPersonas();
   if(!weekKeys.length){showRankingEmpty();return}
   const currentKey=weekKeys[weekKeys.length-1];
   const [currentMes,currentSemana]=currentKey.split('|');
   $('rankingPeriodBadge').textContent=`Fecha ${currentSemana} de ${currentMes}`;
 
-  const realKey=cfg.field?`${cfg.field} real`:'Venta real',objKey=cfg.field?`${cfg.field} obj`:'Venta obj';
-  let list=rows.filter(row=>weekKeyOf(row)===currentKey).map(row=>{
-    const real=num(row,realKey),obj=num(row,objKey);
-    return{local:row.Local,name:row.Vendedor,real,obj,ratio:obj?real/obj*100:null};
-  });
-  if(mode==='ratio'){list=list.filter(p=>p.ratio!==null);list.sort((a,b)=>(b.ratio-a.ratio)||(b.real-a.real)||String(a.name).localeCompare(String(b.name),'es'))}
-  else list.sort((a,b)=>(b.real-a.real)||((b.ratio??-Infinity)-(a.ratio??-Infinity))||String(a.name).localeCompare(String(b.name),'es'));
+  // Sale de f1RatioStandings, igual que la app de Ranking: mismas reglas de clasificación, y los que
+  // no clasifican al final. Después se aplica el filtro de Local/Vendedor (la persona puede tener un
+  // Local fundido "A + B": alcanza con que uno de los dos sea el elegido).
+  const local=$('localFilter').value,seller=$('sellerFilter').value;
+  const visible=p=>(local==='all'||String(p.local).split(' + ').includes(local))&&(seller==='all'||String(p.name)===seller);
+  let list=f1RatioStandings(currentKey,cfg.field).filter(visible);
+  if(mode!=='ratio')list.sort((a,b)=>(estaClasificado(b)-estaClasificado(a))||(b.real-a.real)||((b.ratio??-Infinity)-(a.ratio??-Infinity))||String(a.name).localeCompare(String(b.name),'es'));
 
   const withRatio=list.filter(p=>p.ratio!==null);
   const avgRatio=withRatio.length?withRatio.reduce((sum,p)=>sum+p.ratio,0)/withRatio.length:null;
   const aggregateReal=mode==='ratio'?(list.length?list.reduce((sum,p)=>sum+p.real,0)/list.length:0):list.reduce((sum,p)=>sum+p.real,0);
-  const leader=list[0];
+  const leader=list.find(estaClasificado);
 
   $('rankingMetrics').innerHTML=list.length?
     metricsCard('Vendedores rankeados',number(list.length),'según filtros')+
@@ -1382,10 +1480,10 @@ function renderRankCategory(category){
   // activo puede venir de un solo local) — comparar por el string compuesto los desencontraba y
   // "Puntos GP" quedaba en "—" para esa persona pese a haber puntuado (bug real, auditoría
   // 2026-09-05).
-  const gpPoints=category==='liga'?(()=>{const map={};f1RatioStandings(currentKey,null).slice(0,10).forEach((p,i)=>{map[p.name]=F1_MAIN_POINTS[i]});return map})():null;
+  const gpPoints=category==='liga'?(()=>{const map={};f1RatioStandings(currentKey,null).filter(estaClasificado).slice(0,F1_MAIN_POINTS.length).forEach((p,i)=>{map[p.name]=F1_MAIN_POINTS[i]});return map})():null;
   const gpCol=p=>gpPoints[p.name]??'—';
 
-  const body=list.map((p,i)=>`<tr><td class="num">${rankPos(i)}</td><td class="seller-name">${escapeHtml(p.name)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${cfg.fmt(p.real)}</td><td class="num">${p.obj?cfg.fmt(p.obj):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.ratio!==null?percent(p.ratio):'—'}</td>${gpPoints?`<td class="num">${gpCol(p)}</td>`:''}</tr>`).join('');
+  const body=list.map((p,i)=>`<tr${estaClasificado(p)?'':' class="rank-row-nc"'}><td class="num">${estaClasificado(p)?rankPos(i):rankPosNC}</td><td class="seller-name">${escapeHtml(p.name)}${ncTagHtml(p)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${cfg.fmt(p.real)}</td><td class="num">${p.obj?cfg.fmt(p.obj):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${p.ratio!==null?percent(p.ratio):'—'}</td>${gpPoints?`<td class="num">${gpCol(p)}</td>`:''}</tr>`).join('');
 
   const gpHeadCell=gpPoints?'<th class="align-right">Puntos GP</th>':'';
   $('rankingTable').innerHTML=list.length?

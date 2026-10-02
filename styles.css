@@ -907,6 +907,13 @@ html[data-theme="light"] .store-kpi-card.active .store-kpi-label{color:#B45309}
    Franja de tarjetas + gráfico con escala. El SVG se estira a lo ancho y el texto va en HTML encima
    posicionado en %, así que acá todo lo que es texto (ejes, rótulos, tooltip) es position:absolute
    dentro de .cm-plot / .cm-yaxis / .cm-xaxis. */
+/* Ranking: filas que no clasifican (reglas de la app de Ranking, ver f1RatioStandings). Van al final,
+   apagadas, con "NC" en vez del puesto y el motivo debajo del nombre. */
+.rank-row-nc td{opacity:.6}
+.rank-pos-nc{font:700 10px var(--sans);letter-spacing:.6px;color:var(--muted)}
+.rank-days{display:block;margin-top:2px;font:600 10.5px var(--sans);color:var(--muted)}
+.rank-days.nc{color:var(--amber)}
+
 .cm{display:flex;flex-direction:column;gap:20px}
 .cm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .cm-stat{background:var(--ink);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px 13px;display:flex;flex-direction:column;gap:5px;min-width:0}
