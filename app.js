@@ -95,7 +95,7 @@ const convRate=(row,key)=>{const v=num(row,key);return v>1?v/100:v};
 // cada fila. TICKET_MIN_VALIDO descarta las filas con el ticket cargado en miles en vez de en
 // pesos, que meterían miles de tickets de un solo día y romperían el total.
 const TICKET_MIN_VALIDO=1000;
-function nuevoPonderado(){return{venta:0,ventaConTicket:0,tickets:0,prendas:0,trafico:0,filasSinTicket:0}}
+function nuevoPonderado(){return{venta:0,ventaConTicket:0,tickets:0,prendas:0,trafico:0,filasSinTicket:0,ticketsConv:0,traficoConv:0}}
 // La venta entra SIEMPRE al total; al cálculo de ticket y PxT entra solo la de las filas con un
 // ticket promedio usable, así el dividendo y el divisor hablan de los mismos días.
 function sumarPonderado(acc,venta,ticketProm,pxt,trafico){
@@ -103,6 +103,11 @@ function sumarPonderado(acc,venta,ticketProm,pxt,trafico){
   if(venta&&ticketProm>=TICKET_MIN_VALIDO){
     const tickets=venta/ticketProm;
     acc.tickets+=tickets;acc.ventaConTicket+=venta;acc.prendas+=tickets*(pxt||0);
+    // La conversión cuenta solo las filas que tienen las DOS cosas, tickets y tráfico (2026-10-02).
+    // Antes dividía los tickets de todas las filas por el tráfico de todas: un local-día que cargó
+    // venta sin tráfico metía tickets sin su gente, y uno con tráfico sin venta, gente sin tickets.
+    // En septiembre, con todos los locales: 62,9% → 63,3%.
+    if(trafico>0){acc.ticketsConv+=tickets;acc.traficoConv+=trafico}
   }else if(venta)acc.filasSinTicket++;
   return acc;
 }
@@ -110,11 +115,12 @@ function sumarPonderado(acc,venta,ticketProm,pxt,trafico){
 // `pond`, sin él esto tira "Cannot read properties of undefined" y, como el error sube hasta
 // loadData(), se cae el dashboard ENTERO por una sola vista mal armada (pasó el 2026-10-01 con el
 // informe de temporada). Salteando los vacíos, a lo sumo se desvía un total; el resto sigue vivo.
-function unirPonderados(lista){return lista.filter(Boolean).reduce((acc,p)=>{['venta','ventaConTicket','tickets','prendas','trafico','filasSinTicket'].forEach(k=>acc[k]+=p[k]||0);return acc},nuevoPonderado())}
+function unirPonderados(lista){return lista.filter(Boolean).reduce((acc,p)=>{['venta','ventaConTicket','tickets','prendas','trafico','filasSinTicket','ticketsConv','traficoConv'].forEach(k=>acc[k]+=p[k]||0);return acc},nuevoPonderado())}
 function cerrarPonderado(acc){
   return{venta:acc.venta,trafico:acc.trafico,tickets:acc.tickets,prendas:acc.prendas,filasSinTicket:acc.filasSinTicket,
+    ticketsConv:acc.ticketsConv,traficoConv:acc.traficoConv,
     ticket:acc.tickets?acc.ventaConTicket/acc.tickets:0,
-    conversion:acc.trafico?acc.tickets/acc.trafico:0,
+    conversion:acc.traficoConv?acc.ticketsConv/acc.traficoConv:0,
     pxt:acc.tickets?acc.prendas/acc.tickets:0};
 }
 function normalizeDate(value){if(value instanceof Date&&!Number.isNaN(value.getTime()))return value.toISOString().slice(0,10);const text=String(value??'').trim();if(!text)return '';const iso=text.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return iso.slice(1).join('-');const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);if(dmy)return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;const parsed=new Date(text);return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10)}
@@ -2319,7 +2325,7 @@ function storeDailySeries(rows){
     // contra lo que se necesitaba en un local que no informó cuenta su faltante de carga como si
     // hubiera ido menos gente.
     if(trafico>0)d.trafficTargetConDato+=traficoObj;
-    sumarPonderado(d.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),0);
+    sumarPonderado(d.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),trafico);
     d.cash+=num(row,'Efectivo');d.card+=num(row,'Tarjeta');d.discount+=num(row,'Descuento');d.payCount++;
   });
   return Object.keys(byDate).sort().map(date=>{
@@ -2330,6 +2336,7 @@ function storeDailySeries(rows){
       // Tickets del día y la venta que los respalda (la de filas con ticket válido, ver
       // sumarPonderado): sumados sobre el período reproducen exactamente la conversión y el ticket
       // ponderados de las tarjetas 03 y 04.
+      ticketsConv:d.pond.ticketsConv,traficoConv:d.pond.traficoConv,
       tickets:cerrarPonderado(d.pond).tickets,ventaConTicket:cerrarPonderado(d.pond).ticket*cerrarPonderado(d.pond).tickets,
       // La cargada (ver arriba), en % 0-100.
       conversion:d.traficoConConversion?d.convPorTrafico/d.traficoConConversion*100:null,
@@ -2676,7 +2683,8 @@ function renderStoreConversionModule(container,daily,ctx){
 
   // Tickets ÷ personas de todo el período: el mismo ponderado de la tarjeta 03 (pondLocal en
   // renderStores), así que los dos números coinciden.
-  const tickets=daily.reduce((s,d)=>s+(d.tickets||0),0),personas=daily.reduce((s,d)=>s+d.traffic,0);
+  // Solo locales-día con tickets Y tráfico (ticketsConv/traficoConv), igual que cerrarPonderado.
+  const tickets=daily.reduce((s,d)=>s+(d.ticketsConv||0),0),personas=daily.reduce((s,d)=>s+(d.traficoConv||0),0);
   const conv=personas?tickets/personas*100:0;
   const obj=ctx.hasConvObj?ctx.avgConvObj*100:0;
   const brecha=obj?conv-obj:null;
