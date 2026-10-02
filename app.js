@@ -860,22 +860,43 @@ function ncTagHtml(p){
   return`<span class="rank-days${estaClasificado(p)?'':' nc'}">${p.dias} de ${p.diasAbiertos} día${p.diasAbiertos===1?'':'s'}${estaClasificado(p)?'':` · mínimo ${p.minDias}`}</span>`;
 }
 const rankPosNC='<span class="rank-pos rank-pos-nc">NC</span>';
-function buildGrandPrixStandings(){
-  const weeks=f1AllWeekKeys();
-  if(!weeks.length)return{list:[],month:null,weeks:[]};
-  const month=weeks[weeks.length-1].split('|')[0];
-  const monthWeeks=weeks.filter(k=>k.split('|')[0]===month);
+// ── Período del Ranking: mes y fecha elegidos (pedido 2026-10-02) ──
+// El historial ya llega entero en VENDEDOR_SEMANAL; hasta acá cada pestaña quedaba fija en la última
+// semana o en el mes en curso. Ahora se elige: las pestañas semanales usan la fecha, GP VDH y Copa
+// Constructores el mes. Sin elección (o si la elegida ya no existe en los datos) va lo más reciente.
+const MESES_NOMBRE=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function rankMeses(){return[...new Set(f1AllWeekKeys().map(k=>k.split('|')[0]))]}
+function rankMesElegido(){const m=rankMeses();return m.includes(state.rankMonth)?state.rankMonth:(m[m.length-1]||null)}
+function rankSemanasDelMes(mes){return f1AllWeekKeys().filter(k=>k.split('|')[0]===mes)}
+function rankSemanaElegida(){const ws=rankSemanasDelMes(rankMesElegido());return ws.includes(state.rankWeek)?state.rankWeek:(ws[ws.length-1]||null)}
+// La semana anterior puede ser del mes anterior (Mayor Mejora de la Fecha 1 compara con la última
+// del mes pasado), igual que la app de Ranking.
+function rankSemanaAnterior(weekKey){const ws=f1AllWeekKeys(),i=ws.indexOf(weekKey);return i>0?ws[i-1]:null}
+// "Campeón" solo cuando el mes terminó; mientras corre es "Líder parcial".
+function mesEnCurso(mes){return MESES_NOMBRE[new Date(`${todayKey()}T00:00:00`).getMonth()]===mes}
+const fechaN=weekKey=>`F${String(weekKey).split('|')[1]}`;
+const puntosVacios=()=>({main:0,ticket:0,perfumes:0,boxer:0,pxt:0});
+const totalSemana=s=>s?s.main+s.ticket+s.perfumes+s.boxer+s.pxt:0;
+
+function buildGrandPrixStandings(mesPedido){
+  const meses=rankMeses();
+  const month=mesPedido&&meses.includes(mesPedido)?mesPedido:(meses[meses.length-1]||null);
+  if(!month)return{list:[],month:null,weeks:[]};
+  const monthWeeks=rankSemanasDelMes(month);
   const totals={};
   // Se acumula por NOMBRE solo, no por Local+Nombre: si una persona cubrió dos locales una semana
   // del mes y solo uno otra semana, su etiqueta de Local fundida (ver fusionarVendedoresCompartidos)
   // puede variar semana a semana — con la clave vieja `${local}|${name}` eso partía sus puntos del
   // mes en dos "pilotos" distintos. `locales` junta la unión de todos los locales que pisó en el
   // mes para mostrarla en la tabla (bug real, auditoría 2026-09-05).
-  const ensure=name=>{if(!totals[name])totals[name]={name,locales:new Set(),main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[name]};
+  // perWeek guarda los puntos de cada fecha por categoría: es lo que muestran las columnas F1…F5 y
+  // el detalle desplegable.
+  const ensure=name=>{if(!totals[name])totals[name]={name,locales:new Set(),main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0},perWeek:{}};return totals[name]};
+  const semana=(e,w)=>e.perWeek[w]||(e.perWeek[w]=puntosVacios());
   monthWeeks.forEach(weekKey=>{
-    f1RatioStandings(weekKey,null).filter(estaClasificado).slice(0,F1_MAIN_POINTS.length).forEach((p,i)=>{const e=ensure(p.name);e.main+=F1_MAIN_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
+    f1RatioStandings(weekKey,null).filter(estaClasificado).slice(0,F1_MAIN_POINTS.length).forEach((p,i)=>{const e=ensure(p.name);e.main+=F1_MAIN_POINTS[i];semana(e,weekKey).main+=F1_MAIN_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
     Object.entries(F1_SPRINT_FIELDS).forEach(([cat,field])=>{
-      f1RatioStandings(weekKey,field).filter(estaClasificado).slice(0,F1_SPRINT_POINTS.length).forEach((p,i)=>{const e=ensure(p.name);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
+      f1RatioStandings(weekKey,field).filter(estaClasificado).slice(0,F1_SPRINT_POINTS.length).forEach((p,i)=>{const e=ensure(p.name);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i];semana(e,weekKey)[cat]+=F1_SPRINT_POINTS[i];p.local.split(' + ').forEach(l=>e.locales.add(l))});
     });
   });
   const list=Object.values(totals).map(e=>({...e,local:[...e.locales].sort().join(' + '),total:e.main+e.sprint}));
@@ -937,17 +958,18 @@ function storeRatioStandings(weekKey,field){
   list.sort((a,b)=>(b.ratio-a.ratio)||(b.real-a.real)||String(a.local).localeCompare(String(b.local),'es'));
   return list;
 }
-function buildStoreChampionship(){
-  const weeks=f1AllWeekKeys();
-  if(!weeks.length)return{list:[],month:null,weeks:[]};
-  const month=weeks[weeks.length-1].split('|')[0];
-  const monthWeeks=weeks.filter(k=>k.split('|')[0]===month);
+function buildStoreChampionship(mesPedido){
+  const meses=rankMeses();
+  const month=mesPedido&&meses.includes(mesPedido)?mesPedido:(meses[meses.length-1]||null);
+  if(!month)return{list:[],month:null,weeks:[]};
+  const monthWeeks=rankSemanasDelMes(month);
   const totals={};
-  const ensure=local=>{if(!totals[local])totals[local]={local,main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0}};return totals[local]};
+  const ensure=local=>{if(!totals[local])totals[local]={local,main:0,sprint:0,breakdown:{ticket:0,perfumes:0,boxer:0,pxt:0},perWeek:{}};return totals[local]};
+  const semana=(e,w)=>e.perWeek[w]||(e.perWeek[w]=puntosVacios());
   monthWeeks.forEach(weekKey=>{
-    storeRatioStandings(weekKey,null).slice(0,STORE_MAIN_TOP).forEach((p,i)=>{ensure(p.local).main+=F1_MAIN_POINTS[i]});
+    storeRatioStandings(weekKey,null).slice(0,STORE_MAIN_TOP).forEach((p,i)=>{const e=ensure(p.local);e.main+=F1_MAIN_POINTS[i];semana(e,weekKey).main+=F1_MAIN_POINTS[i]});
     Object.entries(F1_SPRINT_FIELDS).forEach(([cat,field])=>{
-      storeRatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.local);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i]});
+      storeRatioStandings(weekKey,field).slice(0,8).forEach((p,i)=>{const e=ensure(p.local);e.sprint+=F1_SPRINT_POINTS[i];e.breakdown[cat]+=F1_SPRINT_POINTS[i];semana(e,weekKey)[cat]+=F1_SPRINT_POINTS[i]});
     });
   });
   const list=Object.values(totals).map(e=>({...e,total:e.main+e.sprint}));
@@ -956,12 +978,46 @@ function buildStoreChampionship(){
 }
 function showRankGrandPrixEmpty(){
   $('rankingPeriodBadge').textContent='Sin fecha';
+  $('gpChampion').hidden=true;
   $('gpMetrics').innerHTML='';
   $('gpTable').innerHTML='';
+  $('gpWinners').innerHTML='';
   $('gpRowsCount').textContent='';
 }
+// Cartel de arriba: campeón del mes, o líder parcial si el mes todavía corre.
+function campeonHtml(mes,nombre,sub){
+  const enCurso=mesEnCurso(mes);
+  return`<span class="rank-champion-icon">${icon('trophy','trophy-icon')}</span><div class="rank-champion-text"><span class="rank-champion-kicker">${enCurso?'Líder parcial':'Campeón'} de ${escapeHtml(mes)}</span><strong>${escapeHtml(nombre)}</strong><span class="rank-champion-sub">${sub}</span></div>`;
+}
+// Tabla del campeonato del mes (GP VDH y Copa Constructores): una columna por fecha con los puntos de
+// esa fecha (principal + sprints) y el total. Tocando la fila se despliega el detalle por categoría.
+// `localDe` solo lo pasa el GP (la Copa ya es por local).
+function campeonatoTablaHtml(list,filtered,weeks,nombreDe,localDe){
+  const nCols=3+(localDe?1:0)+weeks.length;
+  const head=`<thead><tr><th class="align-right">#</th><th>${localDe?'Vendedor':'Local'}</th>${localDe?'<th>Local</th>':''}${weeks.map(w=>`<th class="align-right">${fechaN(w)}</th>`).join('')}<th class="align-right">Total</th></tr></thead>`;
+  if(!filtered.length)return`${head}<tbody><tr><td colspan="${nCols}" class="empty-state">Sin puntos para estos filtros</td></tr></tbody>`;
+  const body=filtered.map(p=>{
+    const i=list.indexOf(p),trophy=i===0?` ${icon('trophy','trophy-icon')}`:'';
+    const celdas=weeks.map(w=>{const t=totalSemana(p.perWeek[w]);return`<td class="num">${t?number(t):'<span class="missing-value">—</span>'}</td>`}).join('');
+    const filaDet=(etq,s,cls)=>`<tr${cls?` class="${cls}"`:''}><td>${etq}</td><td class="num">${s.main}</td><td class="num">${s.ticket}</td><td class="num">${s.perfumes}</td><td class="num">${s.boxer}</td><td class="num">${s.pxt}</td><td class="num"><strong>${totalSemana(s)}</strong></td></tr>`;
+    const detalle=weeks.map(w=>filaDet(`Fecha ${w.split('|')[1]}`,p.perWeek[w]||puntosVacios())).join('')+
+      filaDet('Total del mes',{main:p.main,...p.breakdown},'gp-detail-total');
+    return`<tr class="gp-row" tabindex="0" aria-expanded="false"><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name"><span class="gp-caret" aria-hidden="true">▸</span>${escapeHtml(nombreDe(p))}</td>${localDe?`<td class="seller-location">${escapeHtml(localDe(p))}</td>`:''}${celdas}<td class="num"><strong>${number(p.total)}</strong></td></tr>`+
+      `<tr class="gp-detail" hidden><td colspan="${nCols}"><table class="gp-detail-table"><thead><tr><th>Fecha</th><th class="align-right">Principal</th><th class="align-right">Ticket</th><th class="align-right">Perfumes</th><th class="align-right">Bóxer</th><th class="align-right">PxT</th><th class="align-right">Total</th></tr></thead><tbody>${detalle}</tbody></table></td></tr>`;
+  }).join('');
+  return`${head}<tbody>${body}</tbody>`;
+}
+// Despliegue del detalle: delegado en la tabla y enganchado una sola vez (la tabla se re-renderiza
+// en cada refresh, pero el elemento <table> es siempre el mismo).
+function engancharDespliegue(tabla){
+  if(!tabla||tabla.dataset.despliegue)return;
+  tabla.dataset.despliegue='1';
+  const alternar=tr=>{const d=tr.nextElementSibling;if(!d||!d.classList.contains('gp-detail'))return;d.hidden=!d.hidden;tr.setAttribute('aria-expanded',String(!d.hidden));tr.classList.toggle('open',!d.hidden)};
+  tabla.addEventListener('click',e=>{const tr=e.target.closest&&e.target.closest('tr.gp-row');if(tr)alternar(tr)});
+  tabla.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const tr=e.target.closest&&e.target.closest('tr.gp-row');if(tr){e.preventDefault();alternar(tr)}});
+}
 function renderRankGrandPrix(){
-  const{list,month,weeks}=buildGrandPrixStandings();
+  const{list,month,weeks}=buildGrandPrixStandings(rankMesElegido());
   if(!month){showRankGrandPrixEmpty();return}
   $('rankingPeriodBadge').textContent=`${month} · ${weeks.length} fecha${weeks.length===1?'':'s'} corrida${weeks.length===1?'':'s'}`;
   if(!list.length){showRankGrandPrixEmpty();return}
@@ -974,19 +1030,22 @@ function renderRankGrandPrix(){
   const leader=list[0];
   const totalPts=list.reduce((sum,p)=>sum+p.total,0);
 
+  $('gpChampion').hidden=false;
+  $('gpChampion').innerHTML=campeonHtml(month,leader.name,`${number(leader.total)} pts · ${escapeHtml(leader.local)}`);
   $('gpMetrics').innerHTML=
     metricsCard('Pilotos puntuando',number(list.length),'con al menos 1 punto este mes')+
-    (leader?metricsCard('Líder',escapeHtml(leader.name),`${number(leader.total)} pts · ${escapeHtml(leader.local)}`,'good'):metricsCard('Líder','—',''))+
     metricsCard('Fechas corridas',number(weeks.length),month)+
-    metricsCard('Puntos repartidos',number(totalPts),'Carrera Principal + Sprints VDH');
+    metricsCard('Puntos repartidos',number(totalPts),'Carrera Principal + Sprints VDH')+
+    metricsCard('Ventaja del líder',list[1]?`${number(leader.total-list[1].total)} pts`:'—',list[1]?`sobre ${escapeHtml(list[1].name)}`:'');
 
-  const body=filtered.map(p=>{
-    const i=list.indexOf(p),b=p.breakdown;
-    return `<tr><td class="num">${rankPos(i)}</td><td class="seller-name">${escapeHtml(p.name)}</td><td class="seller-location">${escapeHtml(p.local)}</td><td class="num">${number(p.main)}</td><td class="num">${number(b.ticket)}</td><td class="num">${number(b.perfumes)}</td><td class="num">${number(b.boxer)}</td><td class="num">${number(b.pxt)}</td><td class="num"><strong>${number(p.total)}</strong></td></tr>`;
-  }).join('');
-  const head=`<thead><tr><th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">Principal</th><th class="align-right">Sprint Ticket</th><th class="align-right">Sprint Perfumes</th><th class="align-right">Sprint Boxer</th><th class="align-right">Sprint PxT</th><th class="align-right">Total</th></tr></thead>`;
-  $('gpTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="9" class="empty-state">Sin puntos para estos filtros</td></tr></tbody>`;
-  $('gpRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} pilotos`:'';
+  $('gpTable').innerHTML=campeonatoTablaHtml(list,filtered,weeks,p=>p.name,p=>p.local);
+  engancharDespliegue($('gpTable'));
+  // Ganador de la carrera principal de cada fecha (el que se llevó los 25 pts), entre los clasificados.
+  $('gpWinners').innerHTML=weeks.length?`<span class="rank-winners-label">Ganador de cada fecha</span>`+weeks.map(w=>{
+    const g=f1RatioStandings(w,null).find(estaClasificado);
+    return`<span class="rank-winner"><b>${fechaN(w)}</b>${g?`${escapeHtml(g.name)} <em>${percent(g.ratio)}</em>`:'—'}</span>`;
+  }).join(''):'';
+  $('gpRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} pilotos · tocá una fila para ver cada fecha`:'';
 }
 // Insignias quedó sin botón en el menú (pedido explícito de limpieza) pero el código de
 // renderRankBadges() sigue acá sin usarse — reactivarla es agregar de vuelta su botón a
@@ -997,7 +1056,18 @@ function renderRankGrandPrix(){
 // "Ticket/Perfumes/Boxer/PxT" de vendedores vivían escondidos atrás de un <select> ("Sprints VDH"),
 // y Locales no tenía categorías propias (una sola vista, Copa Constructores). Liga/GP/Mejora eran
 // además pestañas de PRIMER nivel sueltas, mezcladas con Locales/Evolución en la misma barra.
+// Llena los selectores de mes y fecha (lo más nuevo arriba) y muestra solo los que usa la pestaña:
+// GP VDH y Copa Constructores son del mes, el resto de la fecha, y Evolución no usa ninguno.
+function renderRankPeriodSelectors(){
+  const mes=rankMesElegido(),semana=rankSemanaElegida();
+  $('rankMonthSelect').innerHTML=rankMeses().slice().reverse().map(m=>`<option value="${escapeHtml(m)}"${m===mes?' selected':''}>${escapeHtml(m)}${mesEnCurso(m)?' (en curso)':''}</option>`).join('');
+  $('rankWeekSelect').innerHTML=rankSemanasDelMes(mes).slice().reverse().map(w=>`<option value="${escapeHtml(w)}"${w===semana?' selected':''}>Fecha ${w.split('|')[1]}</option>`).join('');
+  const mensual=(state.rankScope==='sellers'&&state.sellerCategory==='campeonato')||(state.rankScope==='stores'&&state.storeCategory==='constructores');
+  $('rankWeekField').hidden=mensual||state.rankScope==='evolution';
+  $('rankMonthField').hidden=state.rankScope==='evolution';
+}
 function renderRanking(){
+  renderRankPeriodSelectors();
   qa('#rankScopeTabs .rank-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.scope===state.rankScope));
   $('sellerCatTabs').hidden=state.rankScope!=='sellers';
   $('storeCatTabs').hidden=state.rankScope!=='stores';
@@ -1032,6 +1102,7 @@ function renderRanking(){
 }
 function showStoreRankEmpty(){
   $('rankingPeriodBadge').textContent='Sin fecha';
+  $('storeChampion').hidden=true;
   $('storeRankMetrics').innerHTML='';
   $('storeRankTable').innerHTML='';
   $('storeRankRowsCount').textContent='';
@@ -1043,7 +1114,7 @@ function showStoreRankEmpty(){
 function renderRankStores(){
   $('storeRankKicker').textContent='ACUMULADO DEL MES';
   $('storeRankHeading').textContent='Copa Constructores · Carrera Principal + Sprints VDH';
-  const{list,month,weeks}=buildStoreChampionship();
+  const{list,month,weeks}=buildStoreChampionship(rankMesElegido());
   if(!month){showStoreRankEmpty();return}
   $('rankingPeriodBadge').textContent=`${month} · ${weeks.length} fecha${weeks.length===1?'':'s'} corrida${weeks.length===1?'':'s'}`;
   if(!list.length){showStoreRankEmpty();return}
@@ -1053,19 +1124,16 @@ function renderRankStores(){
   const leader=list[0];
   const totalPts=list.reduce((sum,p)=>sum+p.total,0);
 
+  $('storeChampion').hidden=false;
+  $('storeChampion').innerHTML=campeonHtml(month,leader.local,`${number(leader.total)} pts`);
   $('storeRankMetrics').innerHTML=
     metricsCard('Locales puntuando',number(list.length),'con al menos 1 punto este mes')+
-    (leader?metricsCard('Líder',escapeHtml(leader.local),`${number(leader.total)} pts`,'good'):metricsCard('Líder','—',''))+
     metricsCard('Fechas corridas',number(weeks.length),month)+
-    metricsCard('Puntos repartidos',number(totalPts),'Carrera Principal + Sprints VDH');
-
-  const body=filtered.map(p=>{
-    const i=list.indexOf(p),b=p.breakdown,trophy=i===0?` ${icon('trophy','trophy-icon')}`:'';
-    return `<tr><td class="num">${rankPos(i)}${trophy}</td><td class="seller-name">${escapeHtml(p.local)}</td><td class="num">${number(p.main)}</td><td class="num">${number(b.ticket)}</td><td class="num">${number(b.perfumes)}</td><td class="num">${number(b.boxer)}</td><td class="num">${number(b.pxt)}</td><td class="num"><strong>${number(p.total)}</strong></td></tr>`;
-  }).join('');
-  const head=`<thead><tr><th class="align-right">#</th><th>Local</th><th class="align-right">Principal</th><th class="align-right">Sprint Ticket</th><th class="align-right">Sprint Perfumes</th><th class="align-right">Sprint Boxer</th><th class="align-right">Sprint PxT</th><th class="align-right">Total</th></tr></thead>`;
-  $('storeRankTable').innerHTML=filtered.length?`${head}<tbody>${body}</tbody>`:`${head}<tbody><tr><td colspan="8" class="empty-state">Sin puntos para este filtro</td></tr></tbody>`;
-  $('storeRankRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} locales`:'';
+    metricsCard('Puntos repartidos',number(totalPts),'Carrera Principal + Sprints VDH')+
+    metricsCard('Ventaja del líder',list[1]?`${number(leader.total-list[1].total)} pts`:'—',list[1]?`sobre ${escapeHtml(list[1].local)}`:'');
+  $('storeRankTable').innerHTML=campeonatoTablaHtml(list,filtered,weeks,p=>p.local,null);
+  engancharDespliegue($('storeRankTable'));
+  $('storeRankRowsCount').textContent=filtered.length?`${filtered.length} de ${list.length} locales · tocá una fila para ver cada fecha`:'';
 }
 // Resto de categorías de Locales — mismo criterio que RANK_CATEGORIES de vendedores, pero sobre
 // storeRatioStandings(): ranking de UNA sola semana (la última cargada) por % de cumplimiento,
@@ -1084,9 +1152,9 @@ function renderRankStoreCategory(storeCategory){
   const cfg=STORE_CATEGORIES[storeCategory];
   $('storeRankKicker').textContent=cfg.kicker;
   $('storeRankHeading').textContent=cfg.heading;
-  const weeks=f1AllWeekKeys();
-  if(!weeks.length){showStoreRankEmpty();return}
-  const currentKey=weeks[weeks.length-1];
+  $('storeChampion').hidden=true;
+  const currentKey=rankSemanaElegida();
+  if(!currentKey){showStoreRankEmpty();return}
   const[mes,semana]=currentKey.split('|');
   $('rankingPeriodBadge').textContent=`Semana ${semana} de ${mes}`;
   const list=storeRatioStandings(currentKey,cfg.field);
@@ -1375,9 +1443,9 @@ function renderEvolutionWeeks(weeks,heading){
   $('evolutionBadges').innerHTML=recordBadges.length?recordBadges.map(m=>{const meta=badgeMeta[m];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>Récord de ${meta.label}</strong><span>esta semana</span></div><span class="badge-value">${meta.fmt(rec[m].value)}</span></div>`}).join(''):'<div class="empty-state">Sin récords nuevos esta semana</div>';
 }
 function renderRankMejora(){
-  const {rows,weekKeys}=currentWeekRowsPersonas();
-  if(!weekKeys.length){showRankingEmpty();return}
-  const currentKey=weekKeys[weekKeys.length-1],prevKey=weekKeys.length>1?weekKeys[weekKeys.length-2]:null;
+  const {rows}=currentWeekRowsPersonas();
+  const currentKey=rankSemanaElegida(),prevKey=currentKey?rankSemanaAnterior(currentKey):null;
+  if(!currentKey){showRankingEmpty();return}
   const [currentMes,currentSemana]=currentKey.split('|');
   $('rankingPeriodBadge').textContent=prevKey?`Fecha ${currentSemana} de ${currentMes} vs. fecha anterior`:`Fecha ${currentSemana} de ${currentMes} · primera fecha registrada`;
 
@@ -1445,9 +1513,8 @@ function renderRankMejora(){
 function renderRankCategory(category){
   const cfg=RANK_CATEGORIES[category];
   const mode=cfg.sortable?state.rankSortMode:cfg.mode;
-  const {weekKeys}=currentWeekRowsPersonas();
-  if(!weekKeys.length){showRankingEmpty();return}
-  const currentKey=weekKeys[weekKeys.length-1];
+  const currentKey=rankSemanaElegida();
+  if(!currentKey){showRankingEmpty();return}
   const [currentMes,currentSemana]=currentKey.split('|');
   $('rankingPeriodBadge').textContent=`Fecha ${currentSemana} de ${currentMes}`;
 
@@ -3469,6 +3536,9 @@ $('mainDrawerBackdrop').addEventListener('click',closeMainDrawer);
 qa('.drawer-item[data-drawer-view]').forEach(btn=>btn.addEventListener('click',()=>{switchView(btn.dataset.drawerView);closeMainDrawer()}));
 initPeriodPicker();
 applyPeriodPreset(PERIODO_POR_DEFECTO,false);
+// Cambiar de mes vuelve a la última fecha de ese mes.
+$('rankMonthSelect').addEventListener('change',e=>{state.rankMonth=e.target.value;state.rankWeek=null;renderRanking()});
+$('rankWeekSelect').addEventListener('change',e=>{state.rankWeek=e.target.value;renderRanking()});
 scheduleRefresh();loadData();
 
 // Detecta cuando hay una versión nueva del sitio ya publicada (el SW la baja solo en segundo
