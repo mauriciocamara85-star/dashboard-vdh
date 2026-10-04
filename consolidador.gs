@@ -1,5 +1,5 @@
 /*  ════════════════════════════════════════════════════════════════
-    VDH · CONSOLIDADOR  (v15)
+    VDH · CONSOLIDADOR  (v14)
     Va en la planilla CONSOLIDADORA.
 
     Lee los 15 locales + la planilla de e-commerce y arma tablas
@@ -11,7 +11,6 @@
       VENDEDOR_FOTOS    · foto diaria de las métricas semanales
       ECOM_DIARIO       · un renglón por día del e-commerce
       ECOM_SEMANAL      · embudo y Meta Ads por semana
-      RENTABILIDAD      · resultado por local de la temporada (HVL06)
 
     No modifica nada en los archivos de origen: sólo los lee.
 
@@ -132,15 +131,6 @@
     La hoja se sigue escribiendo igual y el mail de control la sigue
     usando (informeCambioHoy), y quien la necesite puede pedirla con
     ?tabla=VENDEDOR_FOTOS. Ver conversación del 2026-10-01.
-
-    v15: nueva tabla RENTABILIDAD para la sección 08 del dashboard. Lee
-    la planilla "HVL06 Tablero de Seguimiento de Locales Propios" tal
-    cual está, sin calcular nada: Ventas, Gastos, CMV, Rentabilidad y
-    los porcentajes de la segunda fila de cada local. Toma SIEMPRE la
-    última pestaña de rentabilidad (la de más a la derecha cuyo B1 dice
-    "RENTABILIDAD"), así cuando arranque Invierno 2027 se pasa sola, sin
-    tocar nada acá. Es lo acumulado de la temporada, no por mes.
-    Ver conversación del 2026-10-04.
     ════════════════════════════════════════════════════════════════ */
 
 var MAIL = 'mauriciocamara85@gmail.com,antonellamazza.vanderholl@gmail.com,danielacostajnk@gmail.com,franotz.vanderholl@gmail.com,brengiselle220696@gmail.com,cintiacast15@gmail.com,nicoseg.vanderholl@gmail.com';
@@ -173,9 +163,6 @@ var LOCALES = [
 
 ];
 
-// v15 — planilla de rentabilidad (HVL06). Se lee la última pestaña de rentabilidad, ver leerRentabilidad().
-var RENTABILIDAD_ID = '1P7v6GkKT11nidz098o_gF57Uen5jk0UbP05ExFcFCF8';
-
 var ECOMMERCE = { nombre: 'E-commerce',
                   id: '1bxVcVKtqiND0tFC4fwifSWWLXFjPNo2iO-0fUVCeQJY' };
 
@@ -190,7 +177,7 @@ var NUM_MES = { 8: 'Septiembre', 9: 'Octubre', 10: 'Noviembre',
 // Las tablas que doGet() acepta si se le piden por nombre (?tabla=...), y las que se cachean.
 var TABLAS_DASHBOARD = [
   'LOCAL_DIARIO', 'VENDEDOR_DIARIO', 'VENDEDOR_SEMANAL',
-  'VENDEDOR_FOTOS', 'ECOM_DIARIO', 'ECOM_SEMANAL', 'RENTABILIDAD'
+  'VENDEDOR_FOTOS', 'ECOM_DIARIO', 'ECOM_SEMANAL'
 ];
 
 // v14 — qué devuelve doGet() cuando NO se le pide una tabla puntual, que es como entran las dos
@@ -381,14 +368,6 @@ function consolidar() {
        'ROAS', 'ROAS con imp.', 'Costo x compra', 'Costo x carrito',
        'Costo x visita', '% Inv / Fact',
        'Ticket obj', 'Conversión obj'], ecomSem);   // v11 — objetivos del canal
-    // v15 — rentabilidad: si la planilla HVL06 falla, el resto del consolidado sigue igual.
-    var rentab = [];
-    try {
-      rentab = leerRentabilidad();
-      escribir('RENTABILIDAD', CAB_RENTABILIDAD, rentab);
-    } catch (e) {
-      errores.push('Rentabilidad: ' + e.message);
-    }
     acumularFotos(fotos, hoy);
     invalidarCache();   // v7 — así el próximo doGet() ya trae esto, sin esperar el TTL
 
@@ -398,7 +377,6 @@ function consolidar() {
               'VENDEDOR_SEMANAL: ' + vendSemanal.length + '\n' +
               'ECOM_DIARIO: ' + ecomDia.length + '\n' +
               'ECOM_SEMANAL: ' + ecomSem.length + '\n' +
-              'RENTABILIDAD: ' + rentab.length + (rentab.length ? ' (' + rentab[0][0] + ')' : '') + '\n' +
               'Fotos de hoy: ' + fotos.length;
     if (errores.length) msg += '\n\n⚠ Errores:\n' + errores.join('\n');
     Logger.log(msg);
@@ -798,68 +776,6 @@ function num(v) {
   }
   var n = parseFloat(s);
   return isNaN(n) ? 0 : n;
-}
-
-// ── v15 · RENTABILIDAD (planilla HVL06) ───────────────────────────
-// Copia la pestaña TAL CUAL: el dashboard muestra lo mismo que la planilla (pedido 2026-10-04).
-// Cada local ocupa DOS filas: la de arriba con los montos y la de abajo con los porcentajes
-// (% facturado, conversión, % tarjeta, % IVA, % CMV…). Columnas de la planilla:
-//   B Local · C Venta Total · D Facturado · E No facturado · F Cantidad · G Precio Unitario
-//   H Tickets · I Ticket Promedio · J Tráfico · K Ventas Fallidas · L Gastos Total
-//   M Gastos Plan de cuentas · N Empleados · O Tarjeta · P Iva · Q CMV · R Rentabilidad
-//   S % Sobre la venta
-var CAB_RENTABILIDAD = ['Temporada', 'Local', 'Código', 'Tipo',
-  'Venta Total', 'Facturado', 'No facturado', 'Cantidad', 'Precio Unitario', 'Tickets',
-  'Ticket Promedio', 'Tráfico', 'Ventas Fallidas', 'Gastos Total', 'Gastos Plan de cuentas',
-  'Empleados', 'Tarjeta', 'Iva', 'CMV', 'Rentabilidad', '% Sobre la venta',
-  '% Facturado', '% No facturado', 'Conversión', '% Fallidas', '% Gastos plan',
-  '% Tarjeta', '% Iva', '% CMV'];
-
-function leerRentabilidad() {
-  var ss = SpreadsheetApp.openById(RENTABILIDAD_ID);
-  var hojas = ss.getSheets(), hoja = null;
-  // La última pestaña de rentabilidad, mirando de derecha a izquierda. No alcanza con "la última
-  // pestaña" a secas: en el archivo hay pestañas de otra cosa (Hoja 10, meses de 2019, Resultado de
-  // Temporada) y no siempre quedan al final.
-  for (var i = hojas.length - 1; i >= 0; i--) {
-    if (/RENTABILIDAD/i.test(String(hojas[i].getRange('B1').getDisplayValue()))) { hoja = hojas[i]; break; }
-  }
-  if (!hoja) throw new Error('no hay ninguna pestaña con "RENTABILIDAD" en B1');
-
-  var alto = hoja.getLastRow();
-  var v = hoja.getRange(1, 1, alto, 20).getValues();
-  var fCab = -1;
-  for (var r = 0; r < alto; r++) { if (String(v[r][1]).trim() === 'Local') { fCab = r; break; } }
-  if (fCab < 0) throw new Error('no encontré la fila de títulos ("Local" en la columna B) en ' + hoja.getName());
-
-  var filas = [];
-  for (var r = fCab + 1; r < alto; r++) {
-    var nombre = String(v[r][1] || '').trim();
-    if (!nombre) continue;                     // la segunda fila de cada local tiene B vacía
-    var sub = v[r + 1] || [];
-    var tipo = /^total$/i.test(nombre) ? 'total' : /e-?commerce/i.test(nombre) ? 'ecommerce' : 'local';
-    var cod = nombre.match(/\(([A-Z0-9]+)\)\s*$/);
-    var fila = [hoja.getName(), nombre.replace(/\s*\([A-Z0-9]+\)\s*$/, ''), cod ? cod[1] : '', tipo];
-    for (var c = 2; c <= 18; c++) fila.push(valorRentabilidad(v[r][c]));        // C..S
-    fila.push(valorRentabilidad(sub[3]), valorRentabilidad(sub[4]), valorRentabilidad(sub[9]),
-              valorRentabilidad(sub[10]), valorRentabilidad(sub[12]), valorRentabilidad(sub[14]),
-              valorRentabilidad(sub[15]), valorRentabilidad(sub[16]));       // D E J K M O P Q de abajo
-    filas.push(fila);
-    // Debajo del e-commerce la pestaña tiene cuentas sueltas de trabajo ("Ejemplo", etc.): se corta acá.
-    if (tipo === 'ecommerce') break;
-  }
-  return filas;
-}
-// Celda de la planilla → número o vacío. Los errores de fórmula (#DIV/0! de un local sin venta
-// cargada todavía) quedan vacíos: el dashboard muestra "—" en vez del error.
-function valorRentabilidad(x) {
-  if (x === '' || x === null || x === undefined) return '';
-  if (typeof x === 'number') return x;
-  var t = String(x).trim();
-  if (!t || t.charAt(0) === '#') return '';
-  var esPct = t.indexOf('%') >= 0, n = num(t);
-  if (t.indexOf('-') >= 0 && n > 0) n = -n;
-  return esPct ? n / 100 : n;
 }
 
 // ── AUTOMÁTICO ────────────────────────────────────────────────────

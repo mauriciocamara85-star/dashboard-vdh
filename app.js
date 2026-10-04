@@ -213,6 +213,7 @@ async function loadData(){
     const data=await response.json();
     state.tables=Array.isArray(data)?{LOCAL_DIARIO:data}:{...data};
     normalizeLocalNames(state.tables);fillFilters();render();
+    cargarRentabilidad();   // planilla de rentabilidad, directo de Google (ver ahí): no frena al resto
     const now=new Date();const stamp=now.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short'});
     $('lastRefresh').textContent=`actualizado ${stamp}`;$('footerUpdated').textContent=`Última actualización: ${stamp}`;$('overviewUpdated').textContent=`Datos actualizados ${stamp}`;
     setStatus('Conectado',true);
@@ -3467,10 +3468,10 @@ function initPeriodPicker(){
 }
 
 // ── 08 · RENTABILIDAD ─────────────────────────────────────────────────────────────
-// Lo que dice la planilla HVL06 (tabla RENTABILIDAD del consolidador, v15), TAL CUAL: sin calcular
-// nada por fila, porque la planilla es la fuente (pedido 2026-10-04). La pestaña es la última de
-// rentabilidad del archivo —hoy Verano 2027, sep 2026 a feb 2027— y los montos son el ACUMULADO de
-// la temporada, no un mes.
+// Lo que dice la planilla HVL06, TAL CUAL: sin calcular nada por fila, porque la planilla es la
+// fuente (pedido 2026-10-04). Se lee directo desde el navegador (ver cargarRentabilidad), la pestaña
+// de la temporada en curso —hoy Verano 2027, sep 2026 a feb 2027— y los montos son el ACUMULADO de la
+// temporada, no un mes.
 // Lo único que se suma acá son los totales de los locales que se muestran: la planilla tiene locales
 // que el dashboard no (MDQ San Martín, Quilmes, San Justo 2) y no tiene DOT todavía, así que su fila
 // "Total" no corresponde a lo que se ve. Se muestran solo los que están en los dos lados.
@@ -3500,17 +3501,116 @@ const rentPlata=v=>v===null?rentGuion:money(v);
 const rentPct=v=>v===null||!Number.isFinite(v)?rentGuion:percent(v*100);
 const rentNum=v=>v===null?rentGuion:number(v);
 
+// ── Lectura DIRECTA de la planilla, sin pasar por el consolidador (pedido 2026-10-04) ──
+// Google deja leer una planilla compartida "con cualquiera que tenga el enlace" desde el navegador
+// (endpoint gviz, con CORS). Ventajas contra el consolidador: no hay que deployar nada y lo que
+// cambien en la planilla se ve al refrescar, sin esperar la corrida de cada hora. Depende de que la
+// planilla SIGA compartida por enlace: si alguien la cierra, la sección lo avisa.
+//
+// Qué pestaña: la de la temporada en curso según la fecha (sep-feb → "Verano <año de febrero>",
+// mar-ago → "Invierno <año>"); si todavía no la crearon, la anterior, con aviso. gviz no lista las
+// pestañas, por eso se la busca por nombre.
+//
+// TRAMPA de gviz: si la pestaña pedida no existe NO da error, devuelve la primera del archivo (hoy
+// Verano 2020) como si nada. Por eso también se pide una pestaña que seguro no existe y se compara:
+// si la respuesta es la misma, la buscada no existe.
+const RENT_PLANILLA_ID='1P7v6GkKT11nidz098o_gF57Uen5jk0UbP05ExFcFCF8';
+const RENT_URL=nombre=>`https://docs.google.com/spreadsheets/d/${RENT_PLANILLA_ID}/gviz/tq?tqx=out:csv&headers=0&range=A1:T120&sheet=${encodeURIComponent(nombre)}`;
+function rentTemporadas(fecha=new Date()){
+  const y=fecha.getFullYear(),m=fecha.getMonth();   // 0 = enero
+  const actual=m>=8?`Verano ${y+1}`:m<=1?`Verano ${y}`:`Invierno ${y}`;
+  const anterior=m>=8?`Invierno ${y}`:m<=1?`Invierno ${y-1}`:`Verano ${y}`;
+  return[actual,anterior];
+}
+function rentCsv(texto){
+  const filas=[];let fila=[],c='',q=false;
+  for(let i=0;i<texto.length;i++){const ch=texto[i];
+    if(q){if(ch==='"'&&texto[i+1]==='"'){c+='"';i++}else if(ch==='"')q=false;else c+=ch}
+    else if(ch==='"')q=true;else if(ch===','){fila.push(c);c=''}
+    else if(ch==='\n'){fila.push(c.replace(/\r$/,''));filas.push(fila);fila=[];c=''}else c+=ch}
+  if(c||fila.length){fila.push(c);filas.push(fila)}
+  return filas;
+}
+// Celda de la planilla → número o null. Llega con el formato de la planilla ("$21.608.901",
+// "-$20.936.600", "60,00%", "21.608.901"); los errores de fórmula (#DIV/0!) quedan en null.
+function rentCelda(t){
+  t=String(t??'').trim();
+  if(!t||t.startsWith('#'))return null;
+  const pct=t.includes('%'),neg=/^-|^\(/.test(t);
+  let s=t.replace(/[^0-9.,]/g,'');
+  if(!s)return null;
+  if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,'');
+  let n=parseFloat(s);
+  if(!Number.isFinite(n))return null;
+  if(neg)n=-n;
+  return pct?n/100:n;
+}
+// Misma lectura que hacía el consolidador: cada local ocupa dos filas (montos arriba, % abajo).
+// Columnas: B Local · C Venta Total · D Facturado · E No facturado · F Cantidad · G Precio Unitario
+// · H Tickets · I Ticket Promedio · J Tráfico · K Ventas Fallidas · L Gastos Total · M Gastos Plan
+// de cuentas · N Empleados · O Tarjeta · P Iva · Q CMV · R Rentabilidad · S % Sobre la venta.
+// gviz se saltea las filas vacías, así que todo se ubica por contenido y no por número de fila.
+const RENT_COLUMNAS=['Venta Total','Facturado','No facturado','Cantidad','Precio Unitario','Tickets','Ticket Promedio','Tráfico','Ventas Fallidas','Gastos Total','Gastos Plan de cuentas','Empleados','Tarjeta','Iva','CMV','Rentabilidad','% Sobre la venta'];
+function rentParsear(grilla,pestana){
+  if(!grilla.some(f=>/RENTABILIDAD/i.test(f[1]||'')))return null;   // no es una pestaña de rentabilidad
+  const fCab=grilla.findIndex(f=>String(f[1]||'').trim()==='Local');
+  if(fCab<0)return null;
+  const filas=[];
+  for(let r=fCab+1;r<grilla.length;r++){
+    const g=grilla[r],nombre=String(g[1]||'').trim();
+    if(!nombre)continue;
+    // La fila de % es la siguiente solo si tiene la B vacía (si viniera vacía entera, gviz la salta
+    // y la siguiente ya sería otro local).
+    const sig=grilla[r+1]||[],sub=String(sig[1]||'').trim()?[]:sig;
+    const tipo=/^total$/i.test(nombre)?'total':/e-?commerce/i.test(nombre)?'ecommerce':'local';
+    const cod=nombre.match(/\(([A-Z0-9]+)\)\s*$/);
+    const o={Temporada:pestana,Local:nombre.replace(/\s*\([A-Z0-9]+\)\s*$/,''),'Código':cod?cod[1]:'',Tipo:tipo};
+    RENT_COLUMNAS.forEach((k,i)=>{o[k]=rentCelda(g[2+i])});
+    Object.assign(o,{'% Facturado':rentCelda(sub[3]),'% No facturado':rentCelda(sub[4]),'Conversión':rentCelda(sub[9]),'% Fallidas':rentCelda(sub[10]),
+      '% Gastos plan':rentCelda(sub[12]),'% Tarjeta':rentCelda(sub[14]),'% Iva':rentCelda(sub[15]),'% CMV':rentCelda(sub[16])});
+    filas.push(o);
+    if(tipo==='ecommerce')break;   // debajo hay cuentas sueltas de trabajo ("Ejemplo", etc.)
+  }
+  return filas.length?filas:null;
+}
+async function cargarRentabilidad(){
+  const[actual,anterior]=rentTemporadas();
+  state.rent={estado:'cargando'};
+  renderRentabilidad();
+  try{
+    const bajar=async nombre=>{const r=await fetch(RENT_URL(nombre),{cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.text()};
+    const[control,tActual,tAnterior]=await Promise.all([bajar('__no_existe__'),bajar(actual),bajar(anterior)]);
+    for(const[pestana,texto]of[[actual,tActual],[anterior,tAnterior]]){
+      if(texto===control)continue;   // la pestaña no existe: gviz devolvió la primera del archivo
+      const filas=rentParsear(rentCsv(texto),pestana);
+      if(filas){
+        state.rent={estado:'ok',filas,pestana,aviso:pestana===actual?'':`Todavía no está la pestaña "${actual}" en la planilla: se muestra "${anterior}".`};
+        renderRentabilidad();
+        return;
+      }
+    }
+    state.rent={estado:'sinPestana',buscada:actual};
+  }catch(err){
+    console.error('cargarRentabilidad:',err);
+    state.rent={estado:'error',detalle:err.message};
+  }
+  renderRentabilidad();
+}
+
 function renderRentabilidad(){
   if(!$('rentabilidadView'))return;
-  const tabla=state.tables.RENTABILIDAD;
-  const vacio=msg=>{
-    $('rentStatus').hidden=false;$('rentStatus').className='rent-status warning';$('rentStatus').innerHTML=RENT_ICONO_INFO+`<div>${msg}</div>`;
+  const rs=state.rent||{estado:'cargando'};
+  const vacio=(msg,tono)=>{
+    $('rentStatus').hidden=false;$('rentStatus').className=`rent-status${tono?` ${tono}`:''}`;$('rentStatus').innerHTML=RENT_ICONO_INFO+`<div>${msg}</div>`;
     ['rentKpis','rentWaterfall','rentBars','rentabilidadTable'].forEach(id=>$(id).innerHTML='');
     ['rentabilidadRowsCount','rentFoot','rentWaterfallNote','rentBarsNote'].forEach(id=>$(id).textContent='');
     $('rentSeasonBadge').textContent='—';
   };
-  if(!Array.isArray(tabla)){vacio('Falta actualizar el consolidador a la <strong>v15</strong>: es el que lee la planilla de rentabilidad y se la pasa al dashboard.');return}
-  if(!tabla.length){vacio('El consolidador no encontró datos en la planilla de rentabilidad.');return}
+  if(rs.estado==='cargando'){vacio('Leyendo la planilla de rentabilidad…');return}
+  if(rs.estado==='error'){vacio(`<strong>No se pudo leer la planilla de rentabilidad.</strong> Revisá que siga compartida como "Cualquier persona con el enlace puede ver". <span class="rent-status-detalle">(${escapeHtml(rs.detalle||'')})</span>`,'warning');return}
+  if(rs.estado==='sinPestana'){vacio(`<strong>No está la pestaña "${escapeHtml(rs.buscada)}" en la planilla de rentabilidad</strong>, ni la de la temporada anterior. La sección busca la pestaña por su nombre: tiene que llamarse exactamente así.`,'warning');return}
+  const tabla=rs.filas||[];
 
   const temporada=String(tabla[0].Temporada||'').trim();
   const localesDash=[...new Set((state.tables.LOCAL_DIARIO||[]).map(r=>r.Local).filter(Boolean))];
@@ -3531,11 +3631,11 @@ function renderRentabilidad(){
 
   $('rentSeasonBadge').textContent=temporada?`${temporada} · acumulado de la temporada`:'Acumulado de la temporada';
   const sinVentas=visibles.length>0&&!conVenta.length;
-  $('rentStatus').hidden=!sinVentas;
-  if(sinVentas){
-    $('rentStatus').className='rent-status';
-    $('rentStatus').innerHTML=`${RENT_ICONO_INFO}<div><strong>La planilla todavía no tiene cargadas las ventas de ${escapeHtml(temporada||'la temporada')}.</strong> Por ahora el resultado de cada local es solo su gasto acumulado. Se completa solo cuando carguen las ventas y el CMV en la planilla.</div>`;
-  }
+  const avisos=[];
+  if(rs.aviso)avisos.push(escapeHtml(rs.aviso));
+  if(sinVentas)avisos.push(`<strong>La planilla todavía no tiene cargadas las ventas de ${escapeHtml(temporada||'la temporada')}.</strong> Por ahora el resultado de cada local es solo su gasto acumulado. Se completa solo cuando carguen las ventas y el CMV en la planilla.`);
+  $('rentStatus').hidden=!avisos.length;
+  if(avisos.length){$('rentStatus').className=`rent-status${rs.aviso?' warning':''}`;$('rentStatus').innerHTML=`${RENT_ICONO_INFO}<div>${avisos.join('<br>')}</div>`}
 
   // ── Tarjetas ──
   const kpi=(label,valor,sub,tono,extra)=>`<div class="rent-kpi${tono?` ${tono}`:''}"><span class="rent-kpi-label">${label}</span><strong class="rent-kpi-value">${valor}</strong><span class="rent-kpi-sub">${sub||''}</span>${extra||''}</div>`;
