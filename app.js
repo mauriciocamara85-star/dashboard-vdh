@@ -206,7 +206,7 @@ function rowsThroughToday(rows){const cutoff=objectiveCutoff();return rows.filte
 async function loadData(){
   if(!state.endpoint){setStatus('Sin configurar');showError('No hay una fuente de datos configurada en este navegador.');hideAppLoading();return}
   setStatus('Conectando...');showError('');startRefreshSpin();
-  if(typeof chequearVersionNueva==='function')chequearVersionNueva();   // ¿hay código nuevo publicado? (ver al final)
+  try{chequearVersionNueva()}catch(e){}   // ¿hay código nuevo publicado? (ver al final). Nunca frena la carga.
   // Un intento con su propio tiempo límite. El consolidador responde en ~2 s con el caché caliente,
   // pero cada 10 minutos el caché vence y el primer pedido relee todas las hojas; si encima coincide
   // con la corrida automática de cada hora, pasa los 20 s que se esperaban antes y el dashboard
@@ -3788,12 +3788,20 @@ if('serviceWorker' in navigator){
 // seguía mostrando la maqueta con la versión nueva ya publicada. Ahora se anota la versión de app.js
 // al abrir (ETag de GitHub Pages) y se compara cada vez que se toca ↻ o se vuelve a la pestaña; si
 // cambió, aparece el mismo cartel de "Actualizar".
-let versionAlAbrir=null;
-const versionPublicada=()=>fetch('app.js',{method:'HEAD',cache:'no-store'}).then(r=>r.headers.get('etag')||r.headers.get('last-modified')).catch(()=>null);
-versionPublicada().then(v=>{versionAlAbrir=v});
+//
+// OJO: loadData() se llama al arrancar, ANTES de que la ejecución llegue a estas líneas. Por eso
+// esto va con `var` y `function` (se pueden usar desde antes de su línea) y nunca con let/const:
+// con `let`, loadData tiraba "Cannot access 'versionAlAbrir' before initialization" y el dashboard
+// no cargaba NADA (2026-10-04). Y todo va adentro de try/catch: avisar de una versión nueva es un
+// extra, jamás puede frenar la carga de datos.
+var versionAlAbrir=null;
+function versionPublicada(){return fetch('app.js',{method:'HEAD',cache:'no-store'}).then(r=>r.headers.get('etag')||r.headers.get('last-modified')).catch(()=>null)}
 function chequearVersionNueva(){
-  if(!versionAlAbrir)return;
-  versionPublicada().then(v=>{if(v&&v!==versionAlAbrir)$('updateBanner').hidden=false});
+  try{
+    if(!versionAlAbrir)return;
+    versionPublicada().then(v=>{if(v&&v!==versionAlAbrir)$('updateBanner').hidden=false}).catch(()=>{});
+  }catch(e){}
 }
+try{versionPublicada().then(v=>{versionAlAbrir=v}).catch(()=>{})}catch(e){}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')chequearVersionNueva()});
 
