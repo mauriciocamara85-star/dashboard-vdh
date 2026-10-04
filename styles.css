@@ -303,6 +303,85 @@ html[data-theme="light"] .filters input[type="date"]{color-scheme:light}
 .error-banner{background:#451d27;border:1px solid #9f3446;color:#fecdd3;padding:12px 15px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px}
 /* Aviso de sección en preparación (datos de ejemplo, no reales todavía) — mismo patrón que
    .error-banner pero en tono ámbar en vez de rojo, para no confundirse con un error real. */
+/* ── 08 · RENTABILIDAD (ver renderRentabilidad en app.js) ─────────────────────────────── */
+.rent-status{display:flex;align-items:flex-start;gap:11px;margin-bottom:16px;padding:13px 16px;border-radius:var(--radius-sm);border:1px solid rgba(96,165,250,.35);background:rgba(96,165,250,.08);color:var(--soft);font-size:13px;line-height:1.5}
+.rent-status[hidden]{display:none}
+.rent-status.warning{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.1)}
+.rent-status strong{color:var(--white)}
+.rent-status-icon{flex:none;width:18px;height:18px;margin-top:1px;color:#60A5FA}
+.rent-status.warning .rent-status-icon{color:var(--amber)}
+.rent-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:14px}
+.rent-kpi{position:relative;display:flex;flex-direction:column;gap:6px;min-width:0;padding:18px 18px 16px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-card);overflow:hidden}
+.rent-kpi::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--line)}
+.rent-kpi.good::before{background:var(--mint)}
+.rent-kpi.bad::before{background:var(--red)}
+.rent-kpi-label{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);font-weight:700}
+.rent-kpi-value{font:600 25px var(--display);color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15}
+.rent-kpi-value small{font:500 13px var(--sans);color:var(--muted)}
+.rent-kpi.good .rent-kpi-value{color:var(--mint)}
+.rent-kpi.bad .rent-kpi-value{color:var(--red)}
+.rent-kpi-sub{font-size:11px;color:var(--muted);line-height:1.4}
+.rent-kpi-split{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:4px;background:var(--ink)}
+.rent-kpi-split i{display:block;height:100%}
+.rent-split-0{background:var(--amber)}.rent-split-1{background:#60A5FA}.rent-split-2{background:var(--coral)}.rent-split-3{background:#A78BFA}
+
+.rent-charts{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
+/* Cascada: cada columna es un paso; la barra va de donde terminó el anterior a donde termina este. */
+.rent-wf-plot{position:relative;display:flex;height:320px;margin:34px 0 0}
+.rent-wf-cero{position:absolute;left:0;right:0;border-top:1px dashed var(--muted);opacity:.55;z-index:0}
+.rent-wf-cero span{position:absolute;right:0;top:-15px;font-size:10px;color:var(--muted)}
+.rent-wf-col{position:relative;flex:1;min-width:0}
+.rent-wf-bar{position:absolute;left:16%;right:16%;border-radius:4px;z-index:1;transition:filter .15s}
+.rent-wf-bar:hover{filter:brightness(1.15)}
+.rent-wf-bar.suma{background:linear-gradient(180deg,#34D399,#059669)}
+.rent-wf-bar.resta{background:linear-gradient(180deg,rgba(248,113,113,.9),rgba(220,38,38,.75))}
+.rent-wf-bar.resultado-pos{background:linear-gradient(180deg,#6EE7B7,#10B981);box-shadow:0 0 0 2px rgba(16,185,129,.35)}
+.rent-wf-bar.resultado-neg{background:linear-gradient(180deg,#F87171,#B91C1C);box-shadow:0 0 0 2px rgba(239,68,68,.35)}
+.rent-wf-val{position:absolute;left:50%;bottom:calc(100% + 5px);transform:translateX(-50%);font:600 11.5px var(--display);color:var(--white);white-space:nowrap}
+.rent-wf-val.abajo{bottom:auto;top:calc(100% + 5px)}
+.rent-wf-labels{display:flex;margin-top:26px}
+.rent-wf-labels span{flex:1;min-width:0;text-align:center;font-size:11px;color:var(--soft);font-weight:600;line-height:1.3}
+.rent-wf-labels em{display:block;font-style:normal;font-weight:500;color:var(--muted);font-size:10.5px}
+/* Resultado por local: barras divergentes desde $0. */
+.rent-bars{display:flex;flex-direction:column;gap:9px}
+.rent-bar-row{display:grid;grid-template-columns:132px minmax(0,1fr) 150px;align-items:center;gap:12px}
+.rent-bar-name{font-size:12px;font-weight:600;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rent-bar-track{position:relative;height:14px;border-radius:7px;background:var(--ink)}
+.rent-bar-zero{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--muted);opacity:.6}
+.rent-bar{position:absolute;top:0;bottom:0;border-radius:7px}
+.rent-bar.pos{background:linear-gradient(90deg,#059669,#34D399)}
+.rent-bar.neg{background:linear-gradient(90deg,#F87171,#DC2626)}
+.rent-bar-val{font:600 12px var(--display);text-align:right;white-space:nowrap}
+.rent-bar-val.good{color:var(--mint)}.rent-bar-val.bad{color:var(--red)}
+.rent-bar-val em{display:block;font:500 10.5px var(--sans);font-style:normal;color:var(--muted)}
+/* Tabla como la planilla: grupos de columnas con su color, el % de la segunda fila debajo del
+   monto y la columna del local fija al scrollear a lo ancho. */
+.table-wrap table.rent-table{min-width:1880px;font-size:12px}
+.rent-table th{position:static}
+.rent-table tr.rent-grupos th{text-align:center;font-size:10.5px;letter-spacing:1.2px;border-bottom:2px solid transparent}
+.rent-table th.rent-g-ventas{background:#1E3A5F;border-bottom-color:#60A5FA}
+.rent-table th.rent-g-gastos{background:#4A3410;border-bottom-color:var(--amber)}
+.rent-table th.rent-g-cmv{background:#3B2657;border-bottom-color:#A78BFA;text-align:right}
+.rent-table th.rent-g-resultado{background:#0F3D33;border-bottom-color:var(--mint);text-align:right}
+.rent-table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.rent-table td small{display:block;margin-top:2px;font-size:10.5px;font-weight:500;color:var(--muted)}
+.rent-table .rent-local{position:sticky;left:0;z-index:3;background:var(--card);min-width:170px;font-weight:600;color:var(--white);box-shadow:1px 0 0 var(--line)}
+.rent-table th.rent-local{background:var(--sub);text-align:left}
+.rent-table td.rent-col-gastos,.rent-table td.rent-col-cmv{background:rgba(148,163,184,.04)}
+.rent-table td.rent-col-resultado{font-weight:700}
+.rent-table tr.rent-total td{border-top:2px solid var(--line);background:var(--row2);font-weight:700}
+.rent-table tr.rent-total .rent-local{background:var(--row2)}
+.rent-table tr.rent-sep td{padding:6px;border:0;background:transparent}
+.rent-table tr.rent-ecom td{background:rgba(96,165,250,.06)}
+.rent-table tr.rent-ecom .rent-local{background:var(--card)}
+/* .table-wrap tiene margen negativo abajo para pegarse al borde del panel: acá no, porque debajo va
+   la nota y quedaba encimada sobre la fila de eCommerce. */
+.table-wrap.rent-table-wrap{margin-bottom:0}
+.rent-foot{margin:16px 0 0;font-size:11.5px;color:var(--muted);line-height:1.5}
+@media(max-width:1100px){.rent-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.rent-charts{grid-template-columns:1fr}}
+@media(max-width:600px){.rent-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rent-bar-row{grid-template-columns:96px minmax(0,1fr) 112px}}
+html[data-theme="light"] .rent-table th.rent-g-ventas,html[data-theme="light"] .rent-table th.rent-g-gastos,html[data-theme="light"] .rent-table th.rent-g-cmv,html[data-theme="light"] .rent-table th.rent-g-resultado{color:#FFFFFF}
+
 .demo-banner{display:flex;align-items:center;gap:9px;background:#402c06;border:1px solid #92650b;color:#fde68a;padding:12px 15px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px}
 .demo-banner .icon-svg{flex:none;width:18px;height:18px;color:#fbbf24}
 

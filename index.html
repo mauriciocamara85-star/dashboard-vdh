@@ -175,11 +175,15 @@
           <article class="panel"><div class="panel-head"><div><span class="section-kicker">ACUMULADO DEL MES</span><h2>Campeonato del mes · Carrera Principal + Sprints VDH</h2></div><span id="gpRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="gpTable" class="table-wide"></table></div><div class="rank-winners" id="gpWinners"></div></article>
         </div>
       </section>
-      <section id="rentabilidadView" class="view"><div class="view-heading"><div><span class="section-kicker">08 / RESULTADO ECONÓMICO</span><h1>Rentabilidad por local.</h1><p>Venta, gastos, CMV y rentabilidad de cada local en un mismo tablero.</p></div></div>
-        <div class="demo-banner"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg> Vista en preparación con <strong>datos de ejemplo</strong>, calculados a partir de la Venta real ya cargada. Se reemplazan por los reales apenas el equipo cree la pestaña "Verano 2027" en la planilla de referencia (Power BI) y se conecte el Apps Script.</div>
-        <div class="metric-grid" id="rentabilidadMetrics"></div>
-        <article class="panel"><div class="panel-head"><div><span class="section-kicker">POR LOCAL</span><h2>Venta, gastos y rentabilidad</h2></div><span id="rentabilidadRowsCount" class="panel-note"></span></div><div class="table-wrap"><table id="rentabilidadTable" class="table-wide"></table></div></article>
-      </section>
+      <section id="rentabilidadView" class="view"><div class="view-heading"><div><span class="section-kicker">08 / RESULTADO ECONÓMICO</span><h1>Rentabilidad por local.</h1><p>Lo que dice la planilla de rentabilidad (HVL06), acumulado de la temporada: ventas, gastos, CMV y resultado de cada local.</p></div><div class="period-badge" id="rentSeasonBadge">—</div></div>
+          <div class="rent-status" id="rentStatus" hidden></div>
+          <div class="rent-kpis" id="rentKpis"></div>
+          <div class="rent-charts">
+            <article class="panel"><div class="panel-head"><div><span class="section-kicker">DE LA VENTA AL RESULTADO</span><h2>Cascada de la temporada</h2></div><span class="panel-note" id="rentWaterfallNote"></span></div><div class="rent-waterfall" id="rentWaterfall"></div></article>
+            <article class="panel"><div class="panel-head"><div><span class="section-kicker">POR LOCAL</span><h2>Resultado de cada local</h2></div><span class="panel-note" id="rentBarsNote"></span></div><div class="rent-bars" id="rentBars"></div></article>
+          </div>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">COMO EN LA PLANILLA</span><h2>Ventas, gastos, CMV y rentabilidad</h2></div><span id="rentabilidadRowsCount" class="panel-note"></span></div><div class="table-wrap rent-table-wrap"><table id="rentabilidadTable" class="rent-table"></table></div><p class="rent-foot" id="rentFoot"></p></article>
+        </section>
       <footer class="app-footer">VDH / datos consolidados desde Google Sheets <span id="footerUpdated"></span></footer>
     </main>
   </div>

@@ -3466,61 +3466,162 @@ function initPeriodPicker(){
   });
 }
 
-// ── 08 · RENTABILIDAD (DATOS DE EJEMPLO) ──────────────────────────────────────────────────────
-// Pospuesto hasta que el equipo cree la pestaña "Verano 2027" en la planilla de referencia que ya
-// usan con datos de Power BI (ver memoria vdh-dashboard-roadmap). Mientras tanto, esta vista arma
-// la MAQUETA con datos de EJEMPLO derivados de la Venta real ya cargada (LOCAL_DIARIO): a cada
-// local se le calcula un % de CMV/Gastos simulado de forma DETERMINÍSTICA (el mismo local siempre
-// da el mismo % simulado en cada render, no cambia solo al recargar) para que se pueda validar el
-// layout antes de conectar el dato real. Cuando la pestaña exista: agregar la lectura real al Apps
-// Script consolidador (nueva tabla, ej. RENTABILIDAD_LOCAL, en el endpoint) y reemplazar
-// mockProfitability() por esos valores — el resto de esta función (agregación, tabla, tarjetas) no
-// debería necesitar cambios.
-function seedFromString(str){let h=0;for(let i=0;i<str.length;i++){h=(h<<5)-h+str.charCodeAt(i);h|=0}return Math.abs(h)}
-function mockRatio(seed,base,spread){const n=(seed%1000)/1000;return base+(n-0.5)*2*spread}
-function mockProfitability(local,venta){
-  const seed=seedFromString(local);
-  const cmvRatio=Math.min(.72,Math.max(.38,mockRatio(seed,.55,.09)));
-  const alquilerRatio=Math.min(.14,Math.max(.02,mockRatio(seed+1,.07,.04)));
-  const empleadosRatio=Math.min(.16,Math.max(.03,mockRatio(seed+2,.09,.04)));
-  const tarjetaRatio=Math.min(.10,Math.max(.03,mockRatio(seed+3,.06,.02)));
-  const otrosRatio=Math.min(.06,Math.max(.01,mockRatio(seed+4,.02,.015)));
-  const cmv=venta*cmvRatio,alquiler=venta*alquilerRatio,empleados=venta*empleadosRatio,tarjeta=venta*tarjetaRatio,otros=venta*otrosRatio;
-  const gastos=alquiler+empleados+tarjeta+otros,rentabilidad=venta-cmv-gastos;
-  return{venta,cmv,alquiler,empleados,tarjeta,otros,gastos,rentabilidad,pct:venta?rentabilidad/venta*100:0};
+// ── 08 · RENTABILIDAD ─────────────────────────────────────────────────────────────
+// Lo que dice la planilla HVL06 (tabla RENTABILIDAD del consolidador, v15), TAL CUAL: sin calcular
+// nada por fila, porque la planilla es la fuente (pedido 2026-10-04). La pestaña es la última de
+// rentabilidad del archivo —hoy Verano 2027, sep 2026 a feb 2027— y los montos son el ACUMULADO de
+// la temporada, no un mes.
+// Lo único que se suma acá son los totales de los locales que se muestran: la planilla tiene locales
+// que el dashboard no (MDQ San Martín, Quilmes, San Justo 2) y no tiene DOT todavía, así que su fila
+// "Total" no corresponde a lo que se ve. Se muestran solo los que están en los dos lados.
+const RENT_CAMPOS_PLATA=['Venta Total','Facturado','No facturado','Cantidad','Tickets','Tráfico','Ventas Fallidas','Gastos Total','Gastos Plan de cuentas','Empleados','Tarjeta','Iva','CMV','Rentabilidad'];
+// Código de la planilla (entre paréntesis después del nombre) → local del dashboard, normalizado.
+// Para los que no están acá se compara por nombre (ver rentLocalDelDashboard): así cuando agreguen
+// DOT se engancha solo aunque usen un código nuevo.
+const RENT_CODIGOS={CAB:'CASEROS',ITB:'ITUZAINGO',MD2:'RIVADAVIA',MOR:'MORON',PCH:'PACHECO',SJU:'SANJUSTO1',FLO:'FLORES',SJB:'SANJUSTOSHOPPING',LZB:'LOMASDEZAMORA',SUN:'UNICENTER',SPB:'PARQUEBROWN',VPA:'VILLADELPARQUE',GRB:'GRANDBOURG'};
+const rentNorm=t=>String(t??'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\bI\b/g,'1').replace(/[^A-Z0-9]/g,'');
+// Monto corto en millones con coma decimal ($548,5M); moneyShort usa punto, que acá se lee como miles.
+const rentCorto=v=>{const a=Math.abs(v);return a>=1e6?`$${new Intl.NumberFormat('es-AR',{maximumFractionDigits:1}).format(a/1e6)}M`:money(a)};
+const rentNombre=t=>String(t??'').toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
+const RENT_ICONO_INFO='<svg class="icon-svg rent-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+function rentLocalDelDashboard(fila,localesDash){
+  const porNorm=Object.fromEntries(localesDash.map(l=>[rentNorm(l),l]));
+  const porCodigo=RENT_CODIGOS[String(fila['Código']||'').toUpperCase()];
+  if(porCodigo&&porNorm[porCodigo])return porNorm[porCodigo];
+  const n=rentNorm(fila.Local);
+  if(porNorm[n])return porNorm[n];
+  // "MDQ Rivadavia" → RIVADAVIA, "Shopping Dot" → DOT: el nombre de la planilla TERMINA con el del
+  // dashboard. No se busca "contiene" a secas para que "MDQ San Martin" no se pegue a nada.
+  return localesDash.find(l=>{const d=rentNorm(l);return d.length>=3&&n.endsWith(d)})||null;
 }
-// Agrupa por Local (respeta el filtro de Local activo, igual que seasonLocalRows) sumando toda la
-// Venta real ya cargada — no depende de Desde/Hasta porque esta vista mira el semestre completo.
-function rentabilidadRows(){
-  const local=$('localFilter').value;
-  const rows=(state.tables.LOCAL_DIARIO||[]).filter(row=>local==='all'||String(row.Local??'')===local);
-  const byLocal={};
-  rows.forEach(row=>{const key=row.Local||'Sin local';byLocal[key]=(byLocal[key]||0)+num(row,'Venta real')});
-  return Object.entries(byLocal).filter(([,venta])=>venta>0).map(([nombre,venta])=>({nombre,...mockProfitability(nombre,venta)})).sort((a,b)=>b.rentabilidad-a.rentabilidad);
-}
+const rentVal=(f,k)=>{const v=f?.[k];return v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v)};
+const rentGuion='<span class="missing-value">—</span>';
+const rentPlata=v=>v===null?rentGuion:money(v);
+const rentPct=v=>v===null||!Number.isFinite(v)?rentGuion:percent(v*100);
+const rentNum=v=>v===null?rentGuion:number(v);
+
 function renderRentabilidad(){
   if(!$('rentabilidadView'))return;
-  const list=rentabilidadRows();
-  if(!list.length){
-    $('rentabilidadMetrics').innerHTML='';
-    $('rentabilidadTable').innerHTML='';
-    $('rentabilidadRowsCount').textContent='';
-    return;
+  const tabla=state.tables.RENTABILIDAD;
+  const vacio=msg=>{
+    $('rentStatus').hidden=false;$('rentStatus').className='rent-status warning';$('rentStatus').innerHTML=RENT_ICONO_INFO+`<div>${msg}</div>`;
+    ['rentKpis','rentWaterfall','rentBars','rentabilidadTable'].forEach(id=>$(id).innerHTML='');
+    ['rentabilidadRowsCount','rentFoot','rentWaterfallNote','rentBarsNote'].forEach(id=>$(id).textContent='');
+    $('rentSeasonBadge').textContent='—';
+  };
+  if(!Array.isArray(tabla)){vacio('Falta actualizar el consolidador a la <strong>v15</strong>: es el que lee la planilla de rentabilidad y se la pasa al dashboard.');return}
+  if(!tabla.length){vacio('El consolidador no encontró datos en la planilla de rentabilidad.');return}
+
+  const temporada=String(tabla[0].Temporada||'').trim();
+  const localesDash=[...new Set((state.tables.LOCAL_DIARIO||[]).map(r=>r.Local).filter(Boolean))];
+  const filasLocal=tabla.filter(f=>f.Tipo==='local');
+  const filtro=$('localFilter').value;
+  const usados=new Set(),locales=[];
+  filasLocal.forEach(f=>{const dash=rentLocalDelDashboard(f,localesDash);if(dash&&!usados.has(dash)){usados.add(dash);locales.push({...f,dash})}});
+  const soloPlanilla=filasLocal.filter(f=>!locales.some(l=>l.Local===f.Local)).map(f=>f.Local);
+  const soloDashboard=localesDash.filter(l=>!usados.has(l));
+  const visibles=filtro==='all'?locales:locales.filter(l=>l.dash===filtro);
+  const ecommerce=filtro==='all'?tabla.find(f=>f.Tipo==='ecommerce'):null;
+
+  // Totales de lo que se ve (ver nota de arriba: no es la fila "Total" de la planilla).
+  const tot=Object.fromEntries(RENT_CAMPOS_PLATA.map(k=>[k,visibles.reduce((sum,f)=>sum+(rentVal(f,k)||0),0)]));
+  const venta=tot['Venta Total'],rent=tot.Rentabilidad,margen=venta?rent/venta:null;
+  const conVenta=visibles.filter(f=>(rentVal(f,'Venta Total')||0)>0);
+  const positivos=visibles.filter(f=>(rentVal(f,'Rentabilidad')||0)>0).length;
+
+  $('rentSeasonBadge').textContent=temporada?`${temporada} · acumulado de la temporada`:'Acumulado de la temporada';
+  const sinVentas=visibles.length>0&&!conVenta.length;
+  $('rentStatus').hidden=!sinVentas;
+  if(sinVentas){
+    $('rentStatus').className='rent-status';
+    $('rentStatus').innerHTML=`${RENT_ICONO_INFO}<div><strong>La planilla todavía no tiene cargadas las ventas de ${escapeHtml(temporada||'la temporada')}.</strong> Por ahora el resultado de cada local es solo su gasto acumulado. Se completa solo cuando carguen las ventas y el CMV en la planilla.</div>`;
   }
-  const totals=list.reduce((acc,r)=>({venta:acc.venta+r.venta,gastos:acc.gastos+r.gastos,cmv:acc.cmv+r.cmv,rentabilidad:acc.rentabilidad+r.rentabilidad}),{venta:0,gastos:0,cmv:0,rentabilidad:0});
-  const pctTotal=totals.venta?totals.rentabilidad/totals.venta*100:0,toneTotal=pctTotal>=0?'good':'bad';
-  $('rentabilidadMetrics').innerHTML=
-    metricsCard('Venta Total',money(totals.venta))+
-    metricsCard('Gastos Total',money(totals.gastos))+
-    metricsCard('CMV Total',money(totals.cmv))+
-    metricsCard('Rentabilidad Total',money(totals.rentabilidad),'',toneTotal)+
-    metricsCard('% Sobre la Venta',percent(pctTotal),'',toneTotal);
-  $('rentabilidadRowsCount').textContent=`${list.length} local${list.length===1?'':'es'}`;
-  // class="num" en las 7 columnas $ que antes quedaban sin clase (texto gris chico en vez de blanco
-  // bold como el resto de la app) — de paso les da la alineación a la derecha de acá abajo, mismo
-  // criterio que el resto de las tablas.
-  const rowsHtml=list.map(r=>{const tone=r.pct>=0?'positive':'negative';return`<tr><td>${escapeHtml(r.nombre)}</td><td class="num">${money(r.venta)}</td><td class="num">${money(r.gastos)}</td><td class="num">${money(r.alquiler)}</td><td class="num">${money(r.empleados)}</td><td class="num">${money(r.tarjeta)}</td><td class="num">${money(r.otros)}</td><td class="num">${money(r.cmv)}</td><td class="num ${tone}">${money(r.rentabilidad)}</td><td class="num ${tone}">${percent(r.pct)}</td></tr>`}).join('');
-  $('rentabilidadTable').innerHTML=`<thead><tr><th>Local</th><th class="align-right">Venta Total</th><th class="align-right">Gastos Total</th><th class="align-right">Alquiler</th><th class="align-right">Empleados</th><th class="align-right">Tarjeta</th><th class="align-right">Otros</th><th class="align-right">CMV</th><th class="align-right">Rentabilidad</th><th class="align-right">% s/ Venta</th></tr></thead><tbody>${rowsHtml}</tbody>`;
+
+  // ── Tarjetas ──
+  const kpi=(label,valor,sub,tono,extra)=>`<div class="rent-kpi${tono?` ${tono}`:''}"><span class="rent-kpi-label">${label}</span><strong class="rent-kpi-value">${valor}</strong><span class="rent-kpi-sub">${sub||''}</span>${extra||''}</div>`;
+  const pctDe=v=>venta?`${percent(v/venta*100)} de la venta`:'sin venta cargada';
+  const partes=[['Plan de cuentas',tot['Gastos Plan de cuentas']],['Empleados',tot.Empleados],['Tarjeta',tot.Tarjeta],['IVA',tot.Iva]].filter(([,v])=>v);
+  const barraGastos=tot['Gastos Total']&&partes.length>1?`<div class="rent-kpi-split">${partes.map(([n,v],i)=>`<i class="rent-split-${i}" style="width:${(v/tot['Gastos Total']*100).toFixed(2)}%" title="${n}: ${money(v)}"></i>`).join('')}</div>`:'';
+  $('rentKpis').innerHTML=
+    kpi('Venta total',money(venta),venta?`${number(conVenta.length)} de ${number(visibles.length)} locales con venta cargada`:'todavía sin cargar en la planilla')+
+    kpi('CMV',money(tot.CMV),pctDe(tot.CMV))+
+    kpi('Gastos',money(tot['Gastos Total']),partes.length?partes.map(([n,v])=>`${n} ${rentCorto(v)}`).join(' · '):'sin gastos cargados','',barraGastos)+
+    kpi('Rentabilidad',money(rent),margen!==null?`${percent(margen*100)} sobre la venta`:'sin venta para calcular el margen',rent>=0?'good':'bad')+
+    kpi('Locales en positivo',`${number(positivos)}<small> de ${number(visibles.length)}</small>`,positivos?'con rentabilidad mayor a $0':'ninguno por ahora',visibles.length&&positivos===visibles.length?'good':'');
+
+  // ── Cascada: Venta → −CMV → −cada gasto → Rentabilidad ──
+  const pasos=[{n:'Venta',v:venta,tipo:'suma'},{n:'CMV',v:-tot.CMV},{n:'Plan de cuentas',v:-tot['Gastos Plan de cuentas']},{n:'Empleados',v:-tot.Empleados},{n:'Tarjeta',v:-tot.Tarjeta},{n:'IVA',v:-tot.Iva}]
+    .filter(p=>p.tipo==='suma'||p.v);
+  let acum=0;
+  const barras=pasos.map(p=>{const ini=acum;acum+=p.v;return{...p,tipo:p.tipo||'resta',ini,fin:acum}});
+  barras.push({n:'Rentabilidad',v:acum,ini:0,fin:acum,tipo:'resultado'});
+  const extremos=barras.flatMap(x=>[x.ini,x.fin]).concat(0);
+  const lo=Math.min(...extremos),hi=Math.max(...extremos),rango=(hi-lo)||1;
+  const Y=v=>(hi-v)/rango*100;
+  $('rentWaterfall').innerHTML=`<div class="rent-wf-plot"><div class="rent-wf-cero" style="top:${Y(0).toFixed(2)}%"><span>$0</span></div>${barras.map(x=>{
+    const top=Y(Math.max(x.ini,x.fin)),alto=Math.max(.6,Math.abs(Y(x.ini)-Y(x.fin)));
+    const cls=x.tipo==='suma'?'suma':x.tipo==='resultado'?(x.v>=0?'resultado-pos':'resultado-neg'):'resta';
+    // El valor va arriba de la barra si la barra sube y abajo si baja, para no taparla.
+    const abajo=x.tipo==='resta'||(x.tipo==='resultado'&&x.v<0);
+    return`<div class="rent-wf-col"><div class="rent-wf-bar ${cls}" style="top:${top.toFixed(2)}%;height:${alto.toFixed(2)}%" title="${escapeHtml(x.n)}: ${money(x.v)}"><span class="rent-wf-val${abajo?' abajo':''}">${x.v<0?'−':''}${rentCorto(x.v)}</span></div></div>`;
+  }).join('')}</div><div class="rent-wf-labels">${barras.map(x=>`<span>${escapeHtml(x.n)}${venta&&x.tipo!=='suma'?`<em>${x.tipo==='resultado'?percent(x.v/venta*100):percent(Math.abs(x.v)/venta*100)}</em>`:''}</span>`).join('')}</div>`;
+  $('rentWaterfallNote').textContent=filtro==='all'?`${visibles.length} locales · sin eCommerce`:rentNombre(filtro);
+
+  // ── Resultado de cada local: barras divergentes desde $0 ──
+  const orden=[...visibles].sort((x,y)=>(rentVal(y,'Rentabilidad')||0)-(rentVal(x,'Rentabilidad')||0));
+  const maxAbs=Math.max(1,...orden.map(f=>Math.abs(rentVal(f,'Rentabilidad')||0)));
+  const hayNeg=orden.some(f=>(rentVal(f,'Rentabilidad')||0)<0),hayPos=orden.some(f=>(rentVal(f,'Rentabilidad')||0)>0);
+  const cero=hayNeg&&hayPos?50:hayNeg?100:0,mitad=hayNeg&&hayPos?50:100;   // dónde cae el $0 en la pista
+  $('rentBars').innerHTML=orden.map(f=>{
+    const r=rentVal(f,'Rentabilidad')||0,v=rentVal(f,'Venta Total')||0,ancho=Math.abs(r)/maxAbs*mitad,izq=r>=0?cero:cero-ancho;
+    return`<div class="rent-bar-row"><span class="rent-bar-name">${escapeHtml(rentNombre(f.dash))}</span><div class="rent-bar-track"><div class="rent-bar-zero" style="left:${cero}%"></div><div class="rent-bar ${r>=0?'pos':'neg'}" style="left:${izq.toFixed(2)}%;width:${ancho.toFixed(2)}%"></div></div><span class="rent-bar-val ${r>=0?'good':'bad'}">${money(r)}<em>${v?`${percent(r/v*100)} de la venta`:'sin venta'}</em></span></div>`;
+  }).join('')||'<div class="empty-state">Sin locales para este filtro</div>';
+  $('rentBarsNote').textContent=sinVentas?'hoy: solo el gasto acumulado':'de mayor a menor';
+
+  // ── Tabla como en la planilla: dos niveles de títulos y, debajo de cada monto, el % de la
+  //    segunda fila del local (% facturado, conversión, % tarjeta, % CMV…) ──
+  // La segunda línea (el % de abajo) solo se escribe si hay dato: donde la planilla tiene #DIV/0!, una
+  // celda vacía se lee mejor que una columna llena de guiones repetidos.
+  const celda=(valor,sub,cls='')=>`<td class="num${cls?` ${cls}`:''}">${valor}${sub!==undefined&&sub!==rentGuion?`<small>${sub}</small>`:''}</td>`;
+  const fila=(f,nombre,clase)=>{
+    const r=rentVal(f,'Rentabilidad'),pv=rentVal(f,'% Sobre la venta');
+    return`<tr${clase?` class="${clase}"`:''}><td class="rent-local">${nombre}</td>`+
+      celda(rentPlata(rentVal(f,'Venta Total')),undefined,'rent-col-venta')+
+      celda(rentPlata(rentVal(f,'Facturado')),rentPct(rentVal(f,'% Facturado')))+
+      celda(rentPlata(rentVal(f,'No facturado')),rentPct(rentVal(f,'% No facturado')))+
+      celda(rentNum(rentVal(f,'Cantidad')))+
+      celda(rentPlata(rentVal(f,'Precio Unitario')))+
+      celda(rentNum(rentVal(f,'Tickets')))+
+      celda(rentPlata(rentVal(f,'Ticket Promedio')))+
+      celda(rentNum(rentVal(f,'Tráfico')),rentPct(rentVal(f,'Conversión')))+
+      celda(rentNum(rentVal(f,'Ventas Fallidas')),rentPct(rentVal(f,'% Fallidas')))+
+      celda(rentPlata(rentVal(f,'Gastos Total')),undefined,'rent-col-gastos')+
+      celda(rentPlata(rentVal(f,'Gastos Plan de cuentas')),rentPct(rentVal(f,'% Gastos plan')))+
+      celda(rentPlata(rentVal(f,'Empleados')))+
+      celda(rentPlata(rentVal(f,'Tarjeta')),rentPct(rentVal(f,'% Tarjeta')))+
+      celda(rentPlata(rentVal(f,'Iva')),rentPct(rentVal(f,'% Iva')))+
+      celda(rentPlata(rentVal(f,'CMV')),rentPct(rentVal(f,'% CMV')),'rent-col-cmv')+
+      celda(rentPlata(r),undefined,`rent-col-resultado${r===null?'':r>=0?' positive':' negative'}`)+
+      celda(rentPct(pv),undefined,`rent-col-resultado${pv===null?'':pv>=0?' positive':' negative'}`)+'</tr>';
+  };
+  // Fila de total: sumas de lo que se ve; los % se recalculan sobre esas sumas solo si hay venta.
+  const filaTotal={...tot,'% Sobre la venta':margen,
+    '% Facturado':venta?tot.Facturado/venta:null,'% No facturado':venta?tot['No facturado']/venta:null,
+    'Precio Unitario':tot.Cantidad?venta/tot.Cantidad:null,'Ticket Promedio':tot.Tickets?venta/tot.Tickets:null,
+    'Conversión':tot['Tráfico']?tot.Tickets/tot['Tráfico']:null,'% Fallidas':null,
+    '% Gastos plan':venta?tot['Gastos Plan de cuentas']/venta:null,'% CMV':venta?tot.CMV/venta:null,'% Tarjeta':null,'% Iva':null};
+  ['Facturado','No facturado','Cantidad','Tickets','Tráfico','Ventas Fallidas','Empleados','Tarjeta','Iva'].forEach(k=>{if(!filaTotal[k])filaTotal[k]=null});
+  const head=`<thead><tr class="rent-grupos"><th rowspan="2" class="rent-local">Local</th><th colspan="9" class="rent-g rent-g-ventas">Ventas</th><th colspan="5" class="rent-g rent-g-gastos">Gastos</th><th rowspan="2" class="rent-g rent-g-cmv">CMV</th><th rowspan="2" class="rent-g rent-g-resultado">Rentabilidad</th><th rowspan="2" class="rent-g rent-g-resultado">% sobre<br>la venta</th></tr><tr>${['Venta total','Facturado','No facturado','Cantidad','Precio unitario','Tickets','Ticket prom.','Tráfico','Ventas fallidas','Total','Plan de cuentas','Empleados','Tarjeta','IVA'].map(t=>`<th class="align-right">${t}</th>`).join('')}</tr></thead>`;
+  const cuerpo=orden.map(f=>fila(f,`${escapeHtml(rentNombre(f.dash))}<small>${escapeHtml(f.Local)}${f['Código']?` · ${escapeHtml(f['Código'])}`:''}</small>`)).join('');
+  const pie=(visibles.length>1?fila(filaTotal,`Total<small>${number(visibles.length)} locales</small>`,'rent-total'):'')+
+    (ecommerce?`<tr class="rent-sep"><td colspan="18"></td></tr>`+fila(ecommerce,'eCommerce<small>no entra en el total</small>','rent-ecom'):'');
+  $('rentabilidadTable').innerHTML=`${head}<tbody>${cuerpo}</tbody><tfoot>${pie}</tfoot>`;
+  $('rentabilidadRowsCount').textContent=`${visibles.length} local${visibles.length===1?'':'es'}${temporada?` · ${temporada}`:''}`;
+  const notas=[];
+  if(filtro==='all'&&soloPlanilla.length)notas.push(`En la planilla pero no en el dashboard: ${soloPlanilla.join(', ')}.`);
+  if(filtro==='all'&&soloDashboard.length)notas.push(`En el dashboard pero todavía no en la planilla: ${soloDashboard.map(rentNombre).join(', ')}.`);
+  notas.push('Los totales suman solo los locales de esta tabla y, como en la planilla, no incluyen eCommerce.');
+  $('rentFoot').textContent=notas.join(' ');
 }
 
 function scheduleRefresh(){clearInterval(state.timer);state.timer=null}
