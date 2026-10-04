@@ -206,11 +206,25 @@ function rowsThroughToday(rows){const cutoff=objectiveCutoff();return rows.filte
 async function loadData(){
   if(!state.endpoint){setStatus('Sin configurar');showError('No hay una fuente de datos configurada en este navegador.');hideAppLoading();return}
   setStatus('Conectando...');showError('');startRefreshSpin();
-  const controller=new AbortController();const timeoutId=setTimeout(()=>controller.abort(),20000);
+  if(typeof chequearVersionNueva==='function')chequearVersionNueva();   // ¿hay código nuevo publicado? (ver al final)
+  // Un intento con su propio tiempo límite. El consolidador responde en ~2 s con el caché caliente,
+  // pero cada 10 minutos el caché vence y el primer pedido relee todas las hojas; si encima coincide
+  // con la corrida automática de cada hora, pasa los 20 s que se esperaban antes y el dashboard
+  // mostraba "tardó demasiado" con el consolidador funcionando (pasó el 2026-10-04). Ahora espera 30 s
+  // y, si vence, reintenta una vez con 45 s antes de rendirse: el segundo pedido casi siempre
+  // encuentra el caché recién armado por el primero.
+  const intentar=async ms=>{
+    const controller=new AbortController(),timeoutId=setTimeout(()=>controller.abort(),ms);
+    try{
+      const response=await fetch(state.endpoint,{cache:'no-store',signal:controller.signal});
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    }finally{clearTimeout(timeoutId)}
+  };
   try{
-    const response=await fetch(state.endpoint,{cache:'no-store',signal:controller.signal});
-    if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    const data=await response.json();
+    let data;
+    try{data=await intentar(30000)}
+    catch(error){if(error.name!=='AbortError')throw error;setStatus('Reintentando...');data=await intentar(45000)}
     state.tables=Array.isArray(data)?{LOCAL_DIARIO:data}:{...data};
     normalizeLocalNames(state.tables);fillFilters();render();
     cargarRentabilidad();   // planilla de rentabilidad, directo de Google (ver ahí): no frena al resto
@@ -221,9 +235,9 @@ async function loadData(){
   }catch(error){
     const timedOut=error.name==='AbortError';
     setStatus('Error de conexión');
-    showError(timedOut?'El consolidador tardó demasiado en responder (más de 20s). Probá actualizar de nuevo.':`No se pudieron cargar los datos del consolidado. Detalle: ${error.message}`);
+    showError(timedOut?'El consolidador no respondió (lo intentamos dos veces, más de un minuto en total). Se siguen viendo los últimos datos cargados; probá actualizar en un rato.':`No se pudieron cargar los datos del consolidado. Detalle: ${error.message}`);
   }finally{
-    clearTimeout(timeoutId);hideAppLoading();stopRefreshSpin();
+    hideAppLoading();stopRefreshSpin();
   }
 }
 function metricsCard(label,value,detail='',tone=''){return `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-detail ${tone}">${detail}</div></div>`}
@@ -3768,4 +3782,18 @@ if('serviceWorker' in navigator){
   });
   $('updateBannerBtn').addEventListener('click',()=>location.reload());
 }
+// El cartel de arriba solo salta cuando cambia sw.js, y casi todos los deploys tocan app.js o
+// styles.css, no sw.js: una pestaña abierta antes de publicar seguía corriendo el código viejo, y el
+// botón ↻ solo vuelve a pedir los DATOS, no recarga el código. Pasó el 2026-10-04: Rentabilidad
+// seguía mostrando la maqueta con la versión nueva ya publicada. Ahora se anota la versión de app.js
+// al abrir (ETag de GitHub Pages) y se compara cada vez que se toca ↻ o se vuelve a la pestaña; si
+// cambió, aparece el mismo cartel de "Actualizar".
+let versionAlAbrir=null;
+const versionPublicada=()=>fetch('app.js',{method:'HEAD',cache:'no-store'}).then(r=>r.headers.get('etag')||r.headers.get('last-modified')).catch(()=>null);
+versionPublicada().then(v=>{versionAlAbrir=v});
+function chequearVersionNueva(){
+  if(!versionAlAbrir)return;
+  versionPublicada().then(v=>{if(v&&v!==versionAlAbrir)$('updateBanner').hidden=false});
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')chequearVersionNueva()});
 
