@@ -28,11 +28,21 @@
          loguea; en false oculta de verdad.
       3. mostrarTodasLasHojas() — la vuelta atrás, por si hay que mirar un
          mes viejo. También corre como dueño, así que tampoco se traba.
-    Se vuelve a correr cada vez que arranca un mes nuevo.
+      4. soloMesActual()        — EL COMANDO DE TODOS LOS DÍAS: deja visible
+         solo el mes en curso y oculta todos los demás, los que ya pasaron
+         Y los que vienen. Sirve también para volver a ordenar después de
+         un mostrarTodasLasHojas(). Va en el menú 🔄 VDH (ver abajo).
+      5. activarCambioDeMes()   — se corre UNA vez: deja programado que
+         soloMesActual() corra solo el día 1 de cada mes a las 6 de la
+         mañana, así nadie se tiene que acordar.
+
+    MENÚ: para tenerlo en el menú 🔄 VDH, en Código.gs, dentro de onOpen(),
+    agregar esta línea antes de .addToUi():
+        .addItem('Dejar visible solo el mes actual', 'soloMesActual')
     ════════════════════════════════════════════════════════════════ */
 
 // true = no oculta nada, solo loguea. Poner en false recién después de ver la lista.
-var MODO_PRUEBA_OCULTAR = true;
+var MODO_PRUEBA_OCULTAR = false;
 
 // Devuelve los meses de MESES anteriores al actual. Si hoy cae fuera del semestre, da lista vacía
 // y no se oculta nada: sin un "mes actual" claro, cualquier cosa que se oculte es a ciegas.
@@ -148,4 +158,60 @@ function mostrarTodasLasHojas() {
   }
   log.push('', 'Total: ' + mostradas);
   Logger.log(log.join('\n'));
+}
+
+// ── 4. SOLO EL MES ACTUAL ─────────────────────────────────────────
+// Deja visibles las hojas del mes en curso y oculta las de TODOS los otros meses del semestre,
+// pasados y futuros (pedido 2026-10-06: ocultarMesesViejos() solo tocaba los anteriores, y después
+// de un mostrarTodasLasHojas() quedaba todo abierto). Las hojas que no son de un mes ("Informe
+// Temporada", "CONFIGURACIÓN", etc.) no se tocan. Primero MUESTRA el mes actual y recién después
+// oculta el resto: así el archivo nunca queda sin ninguna hoja visible, que Sheets no permite.
+// No usa MODO_PRUEBA: es reversible con mostrarTodasLasHojas() y es para correrlo seguido.
+function soloMesActual() {
+  var mesActual = NUM_MES[hoyReal().getMonth()];
+  if (MESES.indexOf(mesActual) < 0) {
+    Logger.log('Hoy no cae en ningún mes del semestre (' + MESES.join(', ') + '): no se toca nada.');
+    return;
+  }
+  var otros = MESES.filter(function (m) { return m !== mesActual; });
+  var t0 = new Date(), totalMostradas = 0, totalOcultadas = 0;
+  var log = ['*** DEJANDO VISIBLE SOLO ' + mesActual.toUpperCase() + ' ***', ''];
+
+  for (var L = 0; L < LOCALES.length; L++) {
+    try {
+      var hojas = SpreadsheetApp.openById(LOCALES[L].id).getSheets();
+      var mostradas = 0, ocultadas = 0;
+      hojas.forEach(function (h) {
+        if (esHojaDeMes(h.getName(), [mesActual]) && h.isSheetHidden()) { h.showSheet(); mostradas++; }
+      });
+      var hayVisibles = hojas.some(function (h) { return !h.isSheetHidden() && !esHojaDeMes(h.getName(), otros); });
+      if (!hayVisibles) {
+        // El local todavía no tiene las hojas del mes actual: ocultar el resto lo dejaría vacío.
+        log.push(LOCALES[L].nombre + ': SALTEADO — no tiene hojas de ' + mesActual + ' y quedaría sin nada visible.');
+        continue;
+      }
+      hojas.forEach(function (h) {
+        if (esHojaDeMes(h.getName(), otros) && !h.isSheetHidden()) { h.hideSheet(); ocultadas++; }
+      });
+      totalMostradas += mostradas; totalOcultadas += ocultadas;
+      log.push(LOCALES[L].nombre + ': ' + ocultadas + ' ocultadas' + (mostradas ? ' · ' + mostradas + ' de ' + mesActual + ' vueltas a mostrar' : ''));
+    } catch (e) {
+      log.push(LOCALES[L].nombre + ': ERROR — ' + e.message);
+    }
+  }
+  log.push('', 'Total: ' + totalOcultadas + ' hojas ocultadas · ' + totalMostradas + ' mostradas · ' +
+           ((new Date() - t0) / 1000).toFixed(0) + ' s');
+  Logger.log(log.join('\n'));
+  try { SpreadsheetApp.getActive().toast('Quedó visible solo ' + mesActual + ' en los ' + LOCALES.length + ' locales.', 'VDH', 8); } catch (e) {}
+}
+
+// ── 5. AUTOMÁTICO EL DÍA 1 DE CADA MES ────────────────────────────
+// Se corre una sola vez. Borra un disparador anterior de soloMesActual (si lo hubiera) para no
+// duplicarlo, y crea uno que corre el día 1 de cada mes a las 6.
+function activarCambioDeMes() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'soloMesActual') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('soloMesActual').timeBased().onMonthDay(1).atHour(6).create();
+  Logger.log('Listo: soloMesActual() va a correr solo el día 1 de cada mes, a las 6.');
 }
