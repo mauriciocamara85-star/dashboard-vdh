@@ -1198,3 +1198,5 @@ html[data-theme="light"] .acum-local{--acum:#0284C7}
 .store-dia-a-dia{margin-top:26px;padding-top:20px;border-top:1px solid var(--line)}
 /* Ventas por sucursal: las dos tablas quedaban pegadas */
 #storeBreakdownPanel>.panel+.panel{margin-top:22px}
+/* La tabla se estira hasta el borde del panel solo cuando es lo último: si abajo viene algo (ganadores del GP), quedaba encimado */
+.table-wrap:not(:last-child){margin-bottom:0}
