@@ -89,17 +89,22 @@ const convRate=(row,key)=>{const v=num(row,key);return v>1?v/100:v};
 // un día de 3 tickets que a uno de 40: con los datos de la red se desviaba hasta +12,1% (San
 // Justo 1) y +7,1% en Rivadavia, donde la tarjeta de vendedores mostraba $80.447 contra los
 // $70.522 de la planilla del local. Es además el criterio de blueSoft (venta ÷ líneas) y el de
-// la tarjeta TICKET PROMEDIO de las propias planillas. Lo mismo vale para Conversión
-// (tickets ÷ tráfico) y para PxT (prendas ÷ tickets).
+// la tarjeta TICKET PROMEDIO de las propias planillas. Lo mismo vale para PxT (prendas ÷ tickets).
+// Conversión: la que cargó el local cada día, ponderada por el tráfico de ese día
+// (Σ tráfico × conversión ÷ Σ tráfico), que es la cuenta de la planilla (2026-10-07: Rivadavia,
+// Semana 1 de Octubre, planilla 69,5% · octubre 68,2%; con tickets ÷ tráfico daba 69,8% y 68,6%).
 // La cantidad de tickets NO viene en el endpoint: se deriva como venta ÷ ticket promedio de
 // cada fila. TICKET_MIN_VALIDO descarta las filas con el ticket cargado en miles en vez de en
 // pesos, que meterían miles de tickets de un solo día y romperían el total.
 const TICKET_MIN_VALIDO=1000;
-function nuevoPonderado(){return{venta:0,ventaConTicket:0,tickets:0,prendas:0,trafico:0,filasSinTicket:0,ticketsConv:0,traficoConv:0}}
+function nuevoPonderado(){return{venta:0,ventaConTicket:0,tickets:0,prendas:0,trafico:0,filasSinTicket:0,ticketsConv:0,traficoConv:0,convPorTrafico:0,traficoConConv:0}}
 // La venta entra SIEMPRE al total; al cálculo de ticket y PxT entra solo la de las filas con un
 // ticket promedio usable, así el dividendo y el divisor hablan de los mismos días.
-function sumarPonderado(acc,venta,ticketProm,pxt,trafico){
+// conv: la conversión cargada en la fila (fracción, ver convRate). Entra si la fila tiene tráfico y
+// conversión; un día con gente y sin ninguna venta cuenta como 0% aunque la celda quedó vacía.
+function sumarPonderado(acc,venta,ticketProm,pxt,trafico,conv){
   acc.venta+=venta;acc.trafico+=trafico||0;
+  if(trafico>0&&conv!==undefined&&(conv>0||!venta)){acc.convPorTrafico+=trafico*(conv||0);acc.traficoConConv+=trafico}
   if(venta&&ticketProm>=TICKET_MIN_VALIDO){
     const tickets=venta/ticketProm;
     acc.tickets+=tickets;acc.ventaConTicket+=venta;acc.prendas+=tickets*(pxt||0);
@@ -115,12 +120,13 @@ function sumarPonderado(acc,venta,ticketProm,pxt,trafico){
 // `pond`, sin él esto tira "Cannot read properties of undefined" y, como el error sube hasta
 // loadData(), se cae el dashboard ENTERO por una sola vista mal armada (pasó el 2026-10-01 con el
 // informe de temporada). Salteando los vacíos, a lo sumo se desvía un total; el resto sigue vivo.
-function unirPonderados(lista){return lista.filter(Boolean).reduce((acc,p)=>{['venta','ventaConTicket','tickets','prendas','trafico','filasSinTicket','ticketsConv','traficoConv'].forEach(k=>acc[k]+=p[k]||0);return acc},nuevoPonderado())}
+function unirPonderados(lista){return lista.filter(Boolean).reduce((acc,p)=>{['venta','ventaConTicket','tickets','prendas','trafico','filasSinTicket','ticketsConv','traficoConv','convPorTrafico','traficoConConv'].forEach(k=>acc[k]+=p[k]||0);return acc},nuevoPonderado())}
 function cerrarPonderado(acc){
   return{venta:acc.venta,trafico:acc.trafico,tickets:acc.tickets,prendas:acc.prendas,filasSinTicket:acc.filasSinTicket,
     ticketsConv:acc.ticketsConv,traficoConv:acc.traficoConv,
     ticket:acc.tickets?acc.ventaConTicket/acc.tickets:0,
-    conversion:acc.traficoConv?acc.ticketsConv/acc.traficoConv:0,
+    // Sin ninguna conversión cargada (o un llamante que no la pasa) queda el cálculo de antes.
+    conversion:acc.traficoConConv?acc.convPorTrafico/acc.traficoConConv:acc.traficoConv?acc.ticketsConv/acc.traficoConv:0,
     pxt:acc.tickets?acc.prendas/acc.tickets:0};
 }
 function normalizeDate(value){if(value instanceof Date&&!Number.isNaN(value.getTime()))return value.toISOString().slice(0,10);const text=String(value??'').trim();if(!text)return '';const iso=text.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)return iso.slice(1).join('-');const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);if(dmy)return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;const parsed=new Date(text);return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10)}
@@ -365,7 +371,7 @@ function computeStoreFocusRows(rows){
     if(!groups[key])groups[key]={local:key,pond:nuevoPonderado(),targetTraffic:0,convObjSum:0,convObjCount:0,ticketObjSum:0,ticketObjCount:0,count:0};
     const g=groups[key];
     g.targetTraffic+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');
-    sumarPonderado(g.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'));
+    sumarPonderado(g.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión'));
     const convObj=convRate(row,'Conversión obj'),ticketObj=num(row,'Ticket obj');
     if(convObj){g.convObjSum+=convObj;g.convObjCount++}
     if(ticketObj){g.ticketObjSum+=ticketObj;g.ticketObjCount++}
@@ -1747,7 +1753,7 @@ function renderSeason(){
     const target=rows.reduce((sum,row)=>sum+num(row,'Objetivo'),0);
     const actual=rows.reduce((sum,row)=>sum+num(row,'Venta real'),0);
     const traffic=rows.reduce((sum,row)=>sum+num(row,'Tráfico real'),0);
-    const pondMes=rows.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real')),nuevoPonderado());
+    const pondMes=rows.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado());
     const cerradoMes=cerrarPonderado(pondMes);
     const conv=cerradoMes.conversion,ticket=cerradoMes.ticket;
     const convObjs=rows.map(row=>convRate(row,'Conversión obj')).filter(v=>v>0);
@@ -1880,7 +1886,7 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     group.ventaPorLocal[row.Local]=(group.ventaPorLocal[row.Local]||0)+num(row,'Venta real');
     group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');
     group.trafficTarget+=num(row,'Tráfico obj')*fraccionSemana(row.Vendedor,row.Local,weekKeyOf(row));
-    sumarPonderado(group.pond,num(row,'Venta real'),num(row,'TP real'),num(row,'PxT real'),num(row,'Tráfico real'));
+    sumarPonderado(group.pond,num(row,'Venta real'),num(row,'TP real'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conv real'));
     // Conversión/TP/PxT se promedian SOLO sobre las semanas que tienen el dato cargado, no sobre
     // todas las filas del vendedor. VENDEDOR_SEMANAL trae una fila por CADA semana del semestre y
     // las que todavía no se trabajaron llegan en cero (en la planilla esas celdas están vacías, el
@@ -1921,11 +1927,18 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     acc.target+=weekLength?sellerWeeklyTarget(row.Local,row.Mes,row.Semana,row.Vendedor)/weekLength:0;
     return acc;
   },{actual:0,target:0});
-  const totalTraffic=list.reduce((sum,row)=>sum+row.traffic,0);
-  // Las tarjetas de arriba también ponderan: se juntan los totales de TODOS los vendedores
-  // visibles y recién ahí se divide, en vez de promediar el promedio de cada persona.
-  const totalPond=cerrarPonderado(unirPonderados(list.map(row=>row.pond)));
+  // Tráfico, Conversión, Ticket y PxT de las tarjetas (y del embudo y el diagnóstico): con "Todos
+  // los vendedores" salen de la planilla del LOCAL (LOCAL_DIARIO, mismo Local/Mes/Semana), igual que
+  // la sección Locales y que la propia planilla, que ya cierra con blueSoft. Lo que carga cada
+  // vendedor no suma lo mismo: Rivadavia, Semana 1 de Octubre, daba 51 personas y $73.804 contra
+  // 53 y $70.267 de la planilla (2026-10-07). Con un vendedor elegido no hay dato del local que le
+  // corresponda: quedan los suyos, ponderados igual (totales primero, recién ahí se divide).
+  const filasLocal=$('sellerFilter').value!=='all'?[]:(state.tables.LOCAL_DIARIO||[]).filter(row=>($('localFilter').value==='all'||String(row.Local??'')===$('localFilter').value)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
+  const delLocal=filasLocal.length?cerrarPonderado(filasLocal.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado())):null;
+  const totalPond=delLocal||cerrarPonderado(unirPonderados(list.map(row=>row.pond)));
+  const totalTraffic=delLocal?delLocal.trafico:list.reduce((sum,row)=>sum+row.traffic,0);
   const avgConv=totalPond.conversion,avgTicket=totalPond.ticket,avgGarments=totalPond.pxt;
+  const fuenteTarjetas=delLocal?'según la planilla del local':null;
   // Conversión/Ticket objetivo son del LOCAL, no por vendedor (ver localObjetivoFor) — se promedia el
   // objetivo de los locales presentes en la vista actual para el diagnóstico y la card de referencia.
   // Se arma desde row.locales (los locales reales, sin combinar) y no desde row.local (que puede ser
@@ -1937,7 +1950,7 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   const avgConvObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.convObj,0)/localObjs.length:0;
   const avgTicketObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.ticketObj,0)/localObjs.length:0;
   const hasConvObj=avgConvObj>0,hasTicketObj=avgTicketObj>0;
-  $('sellerDetailMetrics').innerHTML=metricsCard('Vendedores visibles',number(list.length),'según filtros')+progressCard('Venta',money,dailyTotals.actual,dailyTotals.target,'según registros diarios')+metricsCard('Tráfico real',number(totalTraffic),'personas registradas')+metricsCard('Conversión media',percent(avgConv*100),hasConvObj?`${avgConv>=avgConvObj?'+':''}${percent((avgConv-avgConvObj)*100)} vs. objetivo (${percent(avgConvObj*100)})`:'conversión del período',hasConvObj?(avgConv>=avgConvObj?'good':'bad'):'')+metricsCard('Ticket promedio',money(avgTicket),hasTicketObj?`objetivo ${money(avgTicketObj)}`:'promedio entre vendedores',hasTicketObj?(avgTicket>=avgTicketObj?'good':'bad'):'')+metricsCard('Prendas por ticket',pxtTexto(avgGarments,1),'promedio entre vendedores');
+  $('sellerDetailMetrics').innerHTML=metricsCard('Vendedores visibles',number(list.length),'según filtros')+progressCard('Venta',money,dailyTotals.actual,dailyTotals.target,'según registros diarios')+metricsCard('Tráfico real',number(totalTraffic),fuenteTarjetas||'personas registradas')+metricsCard('Conversión media',percent(avgConv*100),hasConvObj?`${avgConv>=avgConvObj?'+':''}${percent((avgConv-avgConvObj)*100)} vs. objetivo (${percent(avgConvObj*100)})`:'conversión del período',hasConvObj?(avgConv>=avgConvObj?'good':'bad'):'')+metricsCard('Ticket promedio',money(avgTicket),hasTicketObj?`objetivo ${money(avgTicketObj)}`:(fuenteTarjetas||'promedio entre vendedores'),hasTicketObj?(avgTicket>=avgTicketObj?'good':'bad'):'')+metricsCard('Prendas por ticket',pxtTexto(avgGarments,1),fuenteTarjetas||'promedio entre vendedores');
   renderTrafficFunnel('sellerFunnel',list.length>0,totalTraffic,avgConv);
   renderDiagnosisPanel('sellerDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
   renderSellerFocus(list,metricsMonth);
@@ -2647,7 +2660,7 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
 }
 function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;
   // Ponderados sobre todo el período, no promedio de los valores diarios (ver sumarPonderado).
-  const pondLocal=cerrarPonderado(rows.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real')),nuevoPonderado()));
+  const pondLocal=cerrarPonderado(rows.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado()));
   const avgConv=pondLocal.conversion,avgTicket=pondLocal.ticket;
   // Efectivo/Tarjeta/Descuento/objetivos son valores mensuales repetidos en cada día del mes: se
   // promedian, no se suman. Se divide por la cantidad de días donde cada campo realmente vino
@@ -2782,7 +2795,7 @@ function storeDailySeries(rows){
     // contra lo que se necesitaba en un local que no informó cuenta su faltante de carga como si
     // hubiera ido menos gente.
     if(trafico>0)d.trafficTargetConDato+=traficoObj;
-    sumarPonderado(d.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),trafico);
+    sumarPonderado(d.pond,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),trafico,conv);
     d.cash+=num(row,'Efectivo');d.card+=num(row,'Tarjeta');d.discount+=num(row,'Descuento');d.payCount++;
   });
   return Object.keys(byDate).sort().map(date=>{
@@ -2794,6 +2807,9 @@ function storeDailySeries(rows){
       // sumarPonderado): sumados sobre el período reproducen exactamente la conversión y el ticket
       // ponderados de las tarjetas 03 y 04.
       ticketsConv:d.pond.ticketsConv,traficoConv:d.pond.traficoConv,
+      // Conversión cargada × tráfico del día (y ese tráfico), como en cerrarPonderado: sumados sobre
+      // el período dan la conversión de la tarjeta 03 y de la planilla.
+      pondConvPorTrafico:d.pond.convPorTrafico,pondTraficoConConv:d.pond.traficoConConv,
       tickets:cerrarPonderado(d.pond).tickets,ventaConTicket:cerrarPonderado(d.pond).ticket*cerrarPonderado(d.pond).tickets,
       // La cargada (ver arriba), en % 0-100.
       conversion:d.traficoConConversion?d.convPorTrafico/d.traficoConConversion*100:null,
@@ -3138,11 +3154,12 @@ function renderStoreConversionModule(container,daily,ctx){
   if(!datos.some(x=>x.v>0)){container.className='empty-state';container.innerHTML='No hay conversión para estos filtros: hace falta venta y tráfico cargados el mismo día.';return}
   const completos=datos.filter(x=>x.estado==='ok'&&x.v>0);
 
-  // Tickets ÷ personas de todo el período: el mismo ponderado de la tarjeta 03 (pondLocal en
-  // renderStores), así que los dos números coinciden.
-  // Solo locales-día con tickets Y tráfico (ticketsConv/traficoConv), igual que cerrarPonderado.
+  // La conversión de todo el período con la misma cuenta que la tarjeta 03 (pondLocal en
+  // renderStores) y que la planilla: Σ tráfico × conversión cargada ÷ Σ tráfico. Si ningún día
+  // trae conversión cargada, tickets ÷ personas, igual que el respaldo de cerrarPonderado.
   const tickets=daily.reduce((s,d)=>s+(d.ticketsConv||0),0),personas=daily.reduce((s,d)=>s+(d.traficoConv||0),0);
-  const conv=personas?tickets/personas*100:0;
+  const conTrafico=daily.reduce((s,d)=>s+(d.pondTraficoConConv||0),0);
+  const conv=conTrafico?daily.reduce((s,d)=>s+(d.pondConvPorTrafico||0),0)/conTrafico*100:personas?tickets/personas*100:0;
   const obj=ctx.hasConvObj?ctx.avgConvObj*100:0;
   const brecha=obj?conv-obj:null;
   const mejor=completos.length?completos.reduce((a,b)=>b.v>a.v?b:a):null;
@@ -3151,7 +3168,7 @@ function renderStoreConversionModule(container,daily,ctx){
   const pts=v=>`${v>=0?'+':''}${v.toFixed(1).replace('.',',')} pts`;
 
   const stats=[
-    {label:'Conversión del período',value:percent(conv),sub:`${number(Math.round(tickets))} tickets de ${number(personas)} personas`},
+    {label:'Conversión del período',value:percent(conv),sub:conTrafico?`la cargada cada día, pesada por ${number(conTrafico)} personas`:`${number(Math.round(tickets))} tickets de ${number(personas)} personas`},
     {label:'Vs. objetivo',value:brecha!==null?pts(brecha):'—',tone:brecha===null?'':statusTone(conv/obj),
       sub:obj?`objetivo ${percent(obj)}`:'sin objetivo de conversión cargado'},
     {label:'Mejor día',value:mejor?percent(mejor.v):'—',tone:mejor&&obj?statusTone(mejor.v/obj):'',sub:mejor?fechaCorta(mejor):''},
