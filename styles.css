@@ -577,6 +577,7 @@ span.flatpickr-weekday{background:transparent!important;color:var(--muted)!impor
    (spacer estándar del sistema de diseño para separar/destacar una marca sin sumarle un borde). */
 .daily-bar{cursor:crosshair;transition:filter .1s ease}
 .daily-bar-good{fill:var(--mint)}
+.daily-bar-warn{fill:var(--amber)}   /* 85% a 99% del objetivo — regla general, ver statusTone en app.js */
 .daily-bar-bad{fill:var(--red)}
 .daily-bar-none{fill:var(--muted);opacity:.5}
 .daily-bar-target{fill:var(--muted)}

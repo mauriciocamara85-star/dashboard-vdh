@@ -242,7 +242,16 @@ async function loadData(){
 }
 function metricsCard(label,value,detail='',tone=''){return `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-detail ${tone}">${detail}</div></div>`}
 function aggregate(rows){return rows.reduce((acc,row)=>{acc.target+=num(row,'Objetivo')||num(row,'Venta obj');acc.actual+=num(row,'Venta real')||num(row,'Facturación');acc.traffic+=num(row,'Tráfico real')||num(row,'Visitas');acc.targetTraffic+=num(row,'Tráfico nec.')||num(row,'Tráfico obj');acc.orders+=num(row,'Q Ventas')||num(row,'Compras');return acc},{target:0,actual:0,traffic:0,targetTraffic:0,orders:0})}
-function statusTone(value){return value>=1?'good':value>=.9?'warning':'bad'}
+// ── SEMÁFORO DE CUMPLIMIENTO: regla general de TODO el dashboard (pedido 2026-10-07) ──
+//   100% o más del objetivo → verde · de 85% a 99% → amarillo · menos de 85% → rojo
+// Antes cada vista tenía su corte (la mayoría 90%, varias solo verde/rojo sin amarillo). Todo lo
+// que se pinta según el objetivo cumplido pasa por acá: si cambia la regla, se cambia en estas
+// dos constantes. `ratio` es real/objetivo (1 = 100%).
+const UMBRAL_VERDE=1,UMBRAL_AMARILLO=.85;
+// Para tarjetas, textos y barras (clases good / warning / bad).
+function statusTone(ratio){return ratio>=UMBRAL_VERDE?'good':ratio>=UMBRAL_AMARILLO?'warning':'bad'}
+// Para celdas de tabla (clases positive / warning / negative).
+function cumplClase(ratio){return ratio>=UMBRAL_VERDE?'positive':ratio>=UMBRAL_AMARILLO?'warning':'negative'}
 function dailySeries(rows){
   const byDate={};
   rows.forEach(row=>{
@@ -550,7 +559,7 @@ function renderStoreBreakdown(rows){
   // Semáforo solo donde hay un objetivo REAL cargado en la planilla (Conversión obj, Ticket obj,
   // PxT obj). Para % Descuento no existe objetivo: se muestra neutro y el promedio de la red queda
   // en la fila de Total, que es contra lo que se compara para ver quién se va de escala.
-  const tone=(actual,target)=>!target?'':actual>=target?'positive':actual>=target*0.9?'warning':'negative';
+  const tone=(actual,target)=>!target?'':cumplClase(actual/target);
 
   const cols=[['Local','local'],['Total','bruto'],['Descuentos','descuentos'],['% Desc.','pctDiscount'],
     ['Efectivo','efectivo'],['Tarjeta','tarjeta'],['% Efec.','pctCash'],['% Tarj.','pctCard'],
@@ -582,10 +591,10 @@ function renderStoreBreakdown(rows){
   const accCols=[['Local','local'],['Perfumes u.','perfumes'],['Perfumes $','perfumesMonto'],['% s/venta','perfumesPct'],['Falta 2%','perfumesFalta'],
     ['Boxers u.','boxer'],['Boxers $','boxerMonto'],['% s/venta','boxerPct'],['Falta 2%','boxerFalta']];
   const accCeldas=r=>`<td class="num">${number(r.perfumes)}</td><td class="num">${money(r.perfumesMonto)}</td>`+
-    `<td class="num ${r.perfumesPct>=(r.factorAcc||ACCESORIO_OBJETIVO_PCT)?'positive':'negative'}">${percent(r.perfumesPct*100)}</td>`+
+    `<td class="num ${cumplClase(r.perfumesPct/(r.factorAcc||ACCESORIO_OBJETIVO_PCT))}">${percent(r.perfumesPct*100)}</td>`+
     `<td class="num">${r.perfumesFalta<=0?'✓':money(r.perfumesFalta)}</td>`+
     `<td class="num">${number(r.boxer)}</td><td class="num">${money(r.boxerMonto)}</td>`+
-    `<td class="num ${r.boxerPct>=(r.factorAcc||ACCESORIO_OBJETIVO_PCT)?'positive':'negative'}">${percent(r.boxerPct*100)}</td>`+
+    `<td class="num ${cumplClase(r.boxerPct/(r.factorAcc||ACCESORIO_OBJETIVO_PCT))}">${percent(r.boxerPct*100)}</td>`+
     `<td class="num">${r.boxerFalta<=0?'✓':money(r.boxerFalta)}</td>`;
   const accLista=[...base];sortBreakdownList(accLista,'storeAccessoryTable',STORE_ACCESSORY_SORT);
   $('storeAccessoryTable').innerHTML=breakdownHeader(accCols,'storeAccessoryTable')+
@@ -1623,7 +1632,7 @@ function renderSeason(){
   const avgConv=pondSemestre.conversion,avgTicket=pondSemestre.ticket;
   $('seasonMetrics').innerHTML=metricsCard('Venta total semestre',money(totalActual),`${monthsPresent.length} mes(es) con pestaña cargada`)+metricsCard('Cumplimiento objetivo',percent(globalRatio*100),`${money(totalActual-totalTarget)} vs. objetivo`,statusTone(globalRatio))+metricsCard('Tráfico total',number(totalTraffic),`${percent(avgConv*100)} conversión promedio`)+metricsCard('Ticket promedio',money(avgTicket),'venta del semestre ÷ tickets');
 
-  const estadoFor=m=>{if(!m.loaded)return{label:'Sin datos',cls:''};if(m.ratio>=1)return{label:'En objetivo',cls:'positive'};if(m.ratio>=.9)return{label:'Alerta',cls:'warning'};return{label:'Atención',cls:'negative'}};
+  const estadoFor=m=>{if(!m.loaded)return{label:'Sin datos',cls:''};if(m.ratio>=1)return{label:'En objetivo',cls:'positive'};if(m.ratio>=UMBRAL_AMARILLO)return{label:'Alerta',cls:'warning'};return{label:'Atención',cls:'negative'}};
   $('seasonMonthTable').innerHTML=`<thead><tr><th>Mes</th><th class="align-right">Objetivo</th><th class="align-right">Venta real</th><th class="align-right">Avance</th><th class="align-right">Acum. real</th><th class="align-right">Desv. acum.</th><th>Estado</th></tr></thead><tbody>${monthRows.map(m=>{const estado=estadoFor(m);return `<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${money(m.target)}</td><td class="num">${money(m.actual)}</td><td class="num">${percent(m.ratio*100)}</td><td class="num">${money(m.accActual)}</td><td class="num ${m.accDelta>=0?'positive':'negative'}">${money(m.accDelta)}</td><td class="${estado.cls}">${estado.label}</td></tr>`}).join('')}<tr class="season-total"><td class="seller-name">Total</td><td class="num">${money(totalTarget)}</td><td class="num">${money(totalActual)}</td><td class="num">${percent(globalRatio*100)}</td><td class="num">${money(totalActual)}</td><td class="num ${totalActual-totalTarget>=0?'positive':'negative'}">${money(totalActual-totalTarget)}</td><td></td></tr></tbody>`;
 
   $('seasonTrafficTable').innerHTML=`<thead><tr><th>Mes</th><th class="align-right">Tráfico</th><th class="align-right">Conversión</th><th class="align-right">Ticket prom.</th></tr></thead><tbody>${perMonth.map(m=>`<tr><td class="seller-name">${escapeHtml(m.mes)}</td><td class="num">${number(m.traffic)}</td><td class="num">${percent(m.conv*100)}</td><td class="num">${money(m.ticket)}</td></tr>`).join('')}</tbody>`;
@@ -1781,9 +1790,9 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   const body=list.map(row=>{
     const weeksRatio=row.weeksTotal?row.weeksMet/row.weeksTotal:null;
     const weeksCell=weeksRatio!==null
-      ?`<td class="num ${weeksRatio>=1?'positive':weeksRatio<.9?'negative':'warning'}">${row.weeksMet} de ${row.weeksTotal}</td>`
+      ?`<td class="num ${cumplClase(weeksRatio)}">${row.weeksMet} de ${row.weeksTotal}</td>`
       :'<td class="num"><span class="missing-value">Sin datos</span></td>';
-    return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${pxtTexto(row.garmentsAvg,1)}</td><td class="num ${row.ratio>=1?'positive':row.ratio<.9?'negative':'warning'}">${percent(row.ratio*100)}</td>${weeksCell}</tr>`;
+    return `<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td class="num">${money(row.sale)}</td><td class="num">${money(row.target)}</td><td class="num">${number(row.traffic)}</td><td class="num">${percent(row.conversionAvg*100)}</td><td class="num">${money(row.ticketAvg)}</td><td class="num">${pxtTexto(row.garmentsAvg,1)}</td><td class="num ${cumplClase(row.ratio)}">${percent(row.ratio*100)}</td>${weeksCell}</tr>`;
   }).join('');
   $('sellerDetailTable').innerHTML=`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Venta','sale',true)}${headerCell('Objetivo','target',true)}${headerCell('Tráfico','traffic',true)}${headerCell('Conversión','conversionAvg',true)}${headerCell('Ticket promedio','ticketAvg',true)}${headerCell('Prendas por ticket','garmentsAvg',true)}${headerCell('% objetivo','ratio',true)}${headerCell('Semanas en objetivo','weeksRatio',true)}</tr></thead><tbody>${body||'<tr><td colspan="10" class="empty-state">Sin datos para estos filtros</td></tr>'}</tbody>`;
   $('sellerDetailRowsCount').textContent=`${list.length} vendedores`;
@@ -1828,7 +1837,7 @@ function renderAccessories(){const rows=periodRows('VENDEDOR_SEMANAL','accessory
   // Perfumes/Boxers.
   const list=Object.values(groups).map(g=>({...g,local:[...g.locales].sort().join(' + ')})).filter(row=>row.perfumesTarget||row.perfumesActual||row.boxerTarget||row.boxerActual);
   sortAccessories(list);
-  const status=(actual,target)=>target?(actual/target>=1?'positive':actual/target<.9?'negative':'warning'):'warning';const cell=(actual,target)=>`<div class="accessory-cell"><strong>${number(actual)}</strong><span>obj. ${number(target)}</span><em class="${status(actual,target)}">${target?percent(actual/target*100):'Sin objetivo'}</em><small>desvío ${number(actual-target)}</small></div>`;const totals=list.reduce((acc,row)=>{acc.perfumesTarget+=row.perfumesTarget;acc.perfumesActual+=row.perfumesActual;acc.boxerTarget+=row.boxerTarget;acc.boxerActual+=row.boxerActual;return acc},{perfumesTarget:0,perfumesActual:0,boxerTarget:0,boxerActual:0});const totalRatio=(totals.perfumesTarget+totals.boxerTarget)?(totals.perfumesActual+totals.boxerActual)/(totals.perfumesTarget+totals.boxerTarget):0;$('accessoryMetrics').innerHTML=metricsCard('Vendedores con datos',number(list.length),'según filtros')+metricsCard('Perfumes',number(totals.perfumesActual),`obj. ${number(totals.perfumesTarget)} · ${totals.perfumesTarget?percent(totals.perfumesActual/totals.perfumesTarget*100):'sin objetivo'}`,status(totals.perfumesActual,totals.perfumesTarget))+metricsCard('Boxers',number(totals.boxerActual),`obj. ${number(totals.boxerTarget)} · ${totals.boxerTarget?percent(totals.boxerActual/totals.boxerTarget*100):'sin objetivo'}`,status(totals.boxerActual,totals.boxerTarget))+metricsCard('Cumplimiento global',percent(totalRatio*100),'perfumes + boxers',status(totals.perfumesActual+totals.boxerActual,totals.perfumesTarget+totals.boxerTarget));const headerCell=(label,key)=>{const active=state.sort.table==='accessoryTable'&&state.sort.key===key;const sortAttr=active?(state.sort.direction>0?'ascending':'descending'):'none';return `<th data-sort="${key}" tabindex="0" aria-sort="${sortAttr}">${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`};$('accessoryTable').innerHTML=list.length?`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Perfumes','perfumesActual')}${headerCell('Boxers','boxerActual')}</tr></thead><tbody>${list.map(row=>`<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td>${cell(row.perfumesActual,row.perfumesTarget)}</td><td>${cell(row.boxerActual,row.boxerTarget)}</td></tr>`).join('')}</tbody>`:'<tbody><tr><td colspan="4" class="empty-state">Sin datos de accesorios para estos filtros.</td></tr></tbody>';$('accessoryRowsCount').textContent=list.length?`${list.length} vendedores`:'Sin datos';attachSortHeaders('accessoryTable')}
+  const status=(actual,target)=>target?cumplClase(actual/target):'warning';const cell=(actual,target)=>`<div class="accessory-cell"><strong>${number(actual)}</strong><span>obj. ${number(target)}</span><em class="${status(actual,target)}">${target?percent(actual/target*100):'Sin objetivo'}</em><small>desvío ${number(actual-target)}</small></div>`;const totals=list.reduce((acc,row)=>{acc.perfumesTarget+=row.perfumesTarget;acc.perfumesActual+=row.perfumesActual;acc.boxerTarget+=row.boxerTarget;acc.boxerActual+=row.boxerActual;return acc},{perfumesTarget:0,perfumesActual:0,boxerTarget:0,boxerActual:0});const totalRatio=(totals.perfumesTarget+totals.boxerTarget)?(totals.perfumesActual+totals.boxerActual)/(totals.perfumesTarget+totals.boxerTarget):0;$('accessoryMetrics').innerHTML=metricsCard('Vendedores con datos',number(list.length),'según filtros')+metricsCard('Perfumes',number(totals.perfumesActual),`obj. ${number(totals.perfumesTarget)} · ${totals.perfumesTarget?percent(totals.perfumesActual/totals.perfumesTarget*100):'sin objetivo'}`,status(totals.perfumesActual,totals.perfumesTarget))+metricsCard('Boxers',number(totals.boxerActual),`obj. ${number(totals.boxerTarget)} · ${totals.boxerTarget?percent(totals.boxerActual/totals.boxerTarget*100):'sin objetivo'}`,status(totals.boxerActual,totals.boxerTarget))+metricsCard('Cumplimiento global',percent(totalRatio*100),'perfumes + boxers',status(totals.perfumesActual+totals.boxerActual,totals.perfumesTarget+totals.boxerTarget));const headerCell=(label,key)=>{const active=state.sort.table==='accessoryTable'&&state.sort.key===key;const sortAttr=active?(state.sort.direction>0?'ascending':'descending'):'none';return `<th data-sort="${key}" tabindex="0" aria-sort="${sortAttr}">${label}${active?' '+(state.sort.direction>0?'↑':'↓'):''}</th>`};$('accessoryTable').innerHTML=list.length?`<thead><tr>${headerCell('Vendedor','name')}${headerCell('Local','local')}${headerCell('Perfumes','perfumesActual')}${headerCell('Boxers','boxerActual')}</tr></thead><tbody>${list.map(row=>`<tr><td class="seller-name">${escapeHtml(row.name)}</td><td class="seller-location">${escapeHtml(row.local)}</td><td>${cell(row.perfumesActual,row.perfumesTarget)}</td><td>${cell(row.boxerActual,row.boxerTarget)}</td></tr>`).join('')}</tbody>`:'<tbody><tr><td colspan="4" class="empty-state">Sin datos de accesorios para estos filtros.</td></tr></tbody>';$('accessoryRowsCount').textContent=list.length?`${list.length} vendedores`:'Sin datos';attachSortHeaders('accessoryTable')}
 function renderOverview(){
   const localRows=rowsThroughToday(overviewRows('LOCAL_DIARIO')),ecomRows=rowsThroughToday(overviewRows('ECOM_DIARIO')),rows=[...localRows,...ecomRows];
   const a=aggregate(rows);
@@ -1908,7 +1917,7 @@ function renderOverview(){
   const cumplTrend=kpiTrendRow(cumplDelta,cumplDelta!==null?`${cumplDelta>=0?'+':''}${cumplDelta.toFixed(1).replace('.',',')} pts vs. cierre de ayer`:'sin cierre de ayer para comparar');
   const desvioPct=a.target?(ratioHoy-1)*100:null;
   const cumplDetalle=a.target
-    ?`Venta real ${money(a.actual)} · <span class="${deltaHoy>=0?'good':'bad'}">${desvioPct>=0?'+':''}${percent(desvioPct)}</span>`
+    ?`Venta real ${money(a.actual)} · <span class="${statusTone(ratioHoy)}">${desvioPct>=0?'+':''}${percent(desvioPct)}</span>`
     :'Sin objetivo cargado para este período';
 
   // Las 4 tarjetas: una sola métrica grande por tarjeta, sin pisarse entre sí — cada una responde
@@ -1917,7 +1926,7 @@ function renderOverview(){
     kpiCard('Objetivo a la fecha',money(a.target),cumplDetalle,'',cumplTrend,null)+
     // El monto esperado ya lo encabeza Card 1, así que acá no se repite: esta tarjeta aporta la
     // brecha en pesos, que es lo único que no se lee en ninguna otra.
-    kpiCard('Desvío a la fecha',`<span class="${deltaHoy>=0?'good':'bad'}">${deltaHoy>=0?'+':''}${money(deltaHoy)}</span>`,a.target?`${percent(ratioHoy*100)} de cumplimiento a la fecha`:'Sin objetivo cargado para este período','',desvioBadge,null)+
+    kpiCard('Desvío a la fecha',`<span class="${a.target?statusTone(ratioHoy):''}">${deltaHoy>=0?'+':''}${money(deltaHoy)}</span>`,a.target?`${percent(ratioHoy*100)} de cumplimiento a la fecha`:'Sin objetivo cargado para este período','',desvioBadge,null)+
     kpiCard('Ritmo necesario',ritmoNecesario!==null?`${money(ritmoNecesario)} /día`:'—',restanteMes!==null?`${diasRestantes} día${diasRestantes===1?'':'s'} restantes para cubrir ${money(restanteMes)}`:`${diasRestantes} día${diasRestantes===1?'':'s'} restantes del mes`,'',ritmoTrend,null)+
     kpiCard(`Cierre estimado${localMonth?` · ${localMonth}`:''}`,proj?money(proj.ponderada):'—',proj?`Lineal: ${money(proj.lineal)} · ${proj.diasRestantes} días restantes`:'Sin días cargados todavía','',cierreTrend,null);
 
@@ -1939,7 +1948,7 @@ function renderOverview(){
   safeRender(renderStoreHealth,localRows);
   safeRender(renderTeamHealth);
 }
-function renderStoreHealth(localRows){const container=$('storeHealth');const groups={};localRows.forEach(row=>{const key=row.Local||'Sin local';if(!groups[key])groups[key]={local:key,actual:0,target:0};groups[key].actual+=num(row,'Venta real');groups[key].target+=num(row,'Objetivo')});const list=Object.values(groups).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=1?'ok':x.ratio>=.9?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<.9).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.local)}</span><span class="health-local">${percent(x.ratio*100)} del objetivo</span><span class="health-ratio negative">${money(x.actual-x.target)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Todos los locales en objetivo</div>`}`}
+function renderStoreHealth(localRows){const container=$('storeHealth');const groups={};localRows.forEach(row=>{const key=row.Local||'Sin local';if(!groups[key])groups[key]={local:key,actual:0,target:0};groups[key].actual+=num(row,'Venta real');groups[key].target+=num(row,'Objetivo')});const list=Object.values(groups).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=UMBRAL_VERDE?'ok':x.ratio>=UMBRAL_AMARILLO?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<UMBRAL_AMARILLO).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.local)}</span><span class="health-local">${percent(x.ratio*100)} del objetivo</span><span class="health-ratio negative">${money(x.actual-x.target)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Todos los locales en objetivo</div>`}`}
 function renderTeamHealth(){const container=$('teamHealth');
   // Fundida por vendedor compartido y por nombre solo: alguien que cubre 2 locales quedaba con DOS
   // entradas de "salud del equipo" (una por local, cada una con la mitad de su venta y objetivo),
@@ -1947,7 +1956,7 @@ function renderTeamHealth(){const container=$('teamHealth');
   // auditoría 2026-09-05.
   const rows=fusionarVendedoresCompartidos(state.tables.VENDEDOR_SEMANAL||[]);
   const latest={};
-  rows.forEach(row=>{const key=row.Vendedor,semana=Number(row.Semana)||0;if(!latest[key]||semana>=latest[key].semana)latest[key]={semana,local:row.Local,name:row.Vendedor,actual:num(row,'Venta real'),target:num(row,'Venta obj')}});const list=Object.values(latest).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=1?'ok':x.ratio>=.9?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<.9).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.name)}</span><span class="health-local">${escapeHtml(x.local)}</span><span class="health-ratio negative">${percent(x.ratio*100)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Nadie en rojo esta semana</div>`}`}
+  rows.forEach(row=>{const key=row.Vendedor,semana=Number(row.Semana)||0;if(!latest[key]||semana>=latest[key].semana)latest[key]={semana,local:row.Local,name:row.Vendedor,actual:num(row,'Venta real'),target:num(row,'Venta obj')}});const list=Object.values(latest).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=UMBRAL_VERDE?'ok':x.ratio>=UMBRAL_AMARILLO?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<UMBRAL_AMARILLO).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.name)}</span><span class="health-local">${escapeHtml(x.local)}</span><span class="health-ratio negative">${percent(x.ratio*100)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Nadie en rojo esta semana</div>`}`}
 function renderBars(rows,monthCtx){
   const container=$('salesBars');
   const byDate={};
@@ -2116,11 +2125,11 @@ function renderDailyComparison(daily){
   const groupLeft=i=>groupCenter(i)-groupWidth/2;
   const xActual=i=>groupLeft(i)+(slot-barWidth)/2;
   const xTarget=i=>groupLeft(i)+slot+(slot-barWidth)/2;
-  const statusOf=d=>!d.target?'none':d.actual>=d.target?'good':'bad';
+  const statusOf=d=>!d.target?'none':statusTone(d.actual/d.target);
 
   const bars=daily.map((d,i)=>{
     const status=statusOf(d);
-    const actualCls=status==='good'?'daily-bar-good':status==='bad'?'daily-bar-bad':'daily-bar-none';
+    const actualCls=status==='good'?'daily-bar-good':status==='warning'?'daily-bar-warn':status==='bad'?'daily-bar-bad':'daily-bar-none';
     const actualTop=y(d.actual),actualH=Math.max(0,baseline-actualTop);
     const targetTop=y(d.target),targetH=Math.max(0,baseline-targetTop);
     const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${formatDateAR(d.date)} · Venta real: ${money(d.actual)}</title></path>`:'';
@@ -2128,7 +2137,7 @@ function renderDailyComparison(daily){
     return actualPath+targetPath;
   }).join('');
 
-  const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--red)"></i>Día bajo objetivo</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
+  const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--amber)"></i>85% a 99%</span><span><i class="legend-swatch" style="background:var(--red)"></i>Menos de 85%</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
   const first=daily[0],last=daily[daily.length-1];
   container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${daily.length} día${daily.length===1?'':'s'} cargado${daily.length===1?'':'s'}</span><span>${formatDateShortAR(last.date)}</span></div>`;
   attachDailyHover(container,daily,groupCenter);
@@ -2154,7 +2163,7 @@ function attachDailyHover(container,daily,groupCenter){
     let idx=0,best=Infinity;
     daily.forEach((d,i)=>{const dist=Math.abs(groupCenter(i)-svgX);if(dist<best){best=dist;idx=i}});
     setHighlight(idx);
-    const d=daily[idx],delta=d.actual-d.target,deltaPct=d.target?delta/d.target*100:null,realColor=!d.target?'var(--muted)':delta>=0?'var(--mint)':'var(--red)';
+    const d=daily[idx],delta=d.actual-d.target,deltaPct=d.target?delta/d.target*100:null,realColor=!d.target?'var(--muted)':{good:'var(--mint)',warning:'var(--amber)',bad:'var(--red)'}[statusTone(d.actual/d.target)];
     tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(d.date)}</div><div class="chart-tooltip-row"><i style="background:${realColor}"></i><span>Venta real</span><strong>${money(d.actual)}</strong></div><div class="chart-tooltip-row"><i style="background:var(--muted)"></i><span>Objetivo del día</span><strong>${d.target?money(d.target):'sin cargar'}</strong></div>${d.target?`<div class="chart-tooltip-row"><i style="background:${delta>=0?'var(--mint)':'var(--red)'}"></i><span>Desvío</span><strong>${delta>=0?'+':''}${money(delta)} (${deltaPct>=0?'+':''}${percent(deltaPct)})</strong></div>`:''}`;
     tooltipEl.hidden=false;
     tooltipEl.style.left=`${Math.min(92,Math.max(8,clientX/rect.width*100))}%`;
@@ -2875,10 +2884,10 @@ function renderStoreConversionModule(container,daily,ctx){
 
   const stats=[
     {label:'Conversión del período',value:percent(conv),sub:`${number(Math.round(tickets))} tickets de ${number(personas)} personas`},
-    {label:'Vs. objetivo',value:brecha!==null?pts(brecha):'—',tone:brecha===null?'':brecha>=0?'good':'bad',
+    {label:'Vs. objetivo',value:brecha!==null?pts(brecha):'—',tone:brecha===null?'':statusTone(conv/obj),
       sub:obj?`objetivo ${percent(obj)}`:'sin objetivo de conversión cargado'},
-    {label:'Mejor día',value:mejor?percent(mejor.v):'—',tone:mejor&&obj&&mejor.v>=obj?'good':'',sub:mejor?fechaCorta(mejor):''},
-    {label:'Peor día',value:peor?percent(peor.v):'—',tone:peor&&obj&&peor.v<obj?'bad':'',sub:peor?fechaCorta(peor):''}
+    {label:'Mejor día',value:mejor?percent(mejor.v):'—',tone:mejor&&obj?statusTone(mejor.v/obj):'',sub:mejor?fechaCorta(mejor):''},
+    {label:'Peor día',value:peor?percent(peor.v):'—',tone:peor&&obj?statusTone(peor.v/obj):'',sub:peor?fechaCorta(peor):''}
   ];
   const g=lineaDiariaHtml({datos,fmt:v=>percent(v),fmtEje:v=>`${number(v)}%`,objetivo:obj,etiquetaObj:`objetivo ${percent(obj)}`,
     referencia:conv,etiquetaRef:`período ${percent(conv)}`,color:'var(--mint)',gradId:'cmGradConversion'});
@@ -2891,7 +2900,7 @@ function renderStoreConversionModule(container,daily,ctx){
     if(x.estado==='sinCargar')return tipFecha(x.d)+tipFila('','Sin venta y tráfico cargados');
     return tipFecha(x.d)+tipFila('var(--mint)','Conversión',percent(x.v))+
       tipFila('','Personas',number(x.d.traffic))+
-      (obj?tipFila('','Vs. objetivo',`<span class="${x.v>=obj?'good':'bad'}">${pts(x.v-obj)}</span>`):'')+
+      (obj?tipFila('','Vs. objetivo',`<span class="${statusTone(x.v/obj)}">${pts(x.v-obj)}</span>`):'')+
       (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conConversion} de ${x.d.esperados} locales cargaron conversión y tráfico`):'');
   },g.posY);
 }
@@ -2921,7 +2930,7 @@ function renderStoreTicketModule(container,daily,ctx){
 
   const stats=[
     {label:'Ticket promedio',value:money(ticket),sub:`${money(ventaT)} en ${number(Math.round(tickets))} tickets`},
-    {label:'Vs. objetivo',value:brecha!==null?signo(brecha):'—',tone:brecha===null?'':brecha>=0?'good':'bad',
+    {label:'Vs. objetivo',value:brecha!==null?signo(brecha):'—',tone:brecha===null?'':statusTone(ticket/obj),
       sub:obj?`objetivo ${money(obj)}`:'sin objetivo de ticket cargado'},
     {label:'Tendencia reciente',value:tendencia!==null?signo(tendencia):'—',tone:tendencia===null?'':tendencia>=0?'good':'bad',
       sub:tendencia!==null?`últimos ${N} días ${money(reciente)} vs. ${money(anterior)}`:'faltan días completos para comparar'},
@@ -2939,7 +2948,7 @@ function renderStoreTicketModule(container,daily,ctx){
     if(x.estado==='sinCargar')return tipFecha(x.d)+tipFila('','Sin venta cargada');
     return tipFecha(x.d)+tipFila('var(--coral)','Ticket',money(x.v))+
       tipFila('','Venta',money(x.d.actual))+
-      (obj?tipFila('','Vs. objetivo',`<span class="${x.v>=obj?'good':'bad'}">${signo((x.v/obj-1)*100)}</span>`):'')+
+      (obj?tipFila('','Vs. objetivo',`<span class="${statusTone(x.v/obj)}">${signo((x.v/obj-1)*100)}</span>`):'')+
       (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conVenta} de ${x.d.esperados} locales cargaron venta`):'');
   },g.posY);
 }
@@ -2963,13 +2972,13 @@ function renderStoreTrafficModule(container,daily){
   // número que la tarjeta 05 de arriba, que se calcula igual — ver renderStoreKpiGrid.
   const objConDato=daily.reduce((s,d)=>s+(d.trafficTargetConDato||0),0);
   const cumpl=objConDato?total/objConDato:null;
-  const tono=r=>r===null?'':r>=1?'good':r>=.9?'warning':'bad';
+  const tono=r=>r===null?'':statusTone(r);
 
   const stats=[
     {label:'Personas en el período',value:number(total),
       sub:`${diasConDato} día${diasConDato===1?'':'s'} con tráfico cargado`},
     {label:'Promedio por día',value:`${number(Math.round(promedio))}<small>pers./día</small>`,
-      sub:promObj?`objetivo ${number(Math.round(promObj))}/día · <b class="${desvioProm>=0?'good':'bad'}">${desvioProm>=0?'+':''}${percent(desvioProm)}</b>`:'sin objetivo de tráfico cargado'},
+      sub:promObj?`objetivo ${number(Math.round(promObj))}/día · <b class="${statusTone(promedio/promObj)}">${desvioProm>=0?'+':''}${percent(desvioProm)}</b>`:'sin objetivo de tráfico cargado'},
     {label:'Día de mayor tráfico',value:pico?`${number(pico.v)}<small>pers.</small>`:'—',
       sub:pico?`${diaCortoDe(pico.d.date)} ${formatDateShortAR(pico.d.date)}`:''},
     {label:'Vs. objetivo de tráfico',value:cumpl!==null?percent(cumpl*100):'—',tone:tono(cumpl),
@@ -2987,7 +2996,7 @@ function renderStoreTrafficModule(container,daily){
     if(x.estado==='sinCargar')return f+fila('','Todavía sin cargar')+(x.obj?fila('var(--white)','Objetivo',`${number(x.obj)} pers.`):'');
     const r=x.obj?x.v/x.obj:null;
     return f+fila('var(--amber)','Personas',number(x.v))+
-      (x.obj?fila('var(--white)','Objetivo',number(x.obj))+fila('','Cumplimiento',`<span class="${r>=1?'good':'bad'}">${percent(r*100)}</span>`):'')+
+      (x.obj?fila('var(--white)','Objetivo',number(x.obj))+fila('','Cumplimiento',`<span class="${statusTone(r)}">${percent(r*100)}</span>`):'')+
       (x.estado==='parcial'?fila('',`Parcial: cargaron ${x.d.conTrafico} de ${x.d.esperados} locales`):'');
   });
 }
@@ -3022,17 +3031,17 @@ function renderStoreVentaChart(container,daily){
   const groupLeft=i=>groupCenter(i)-groupWidth/2;
   const xActual=i=>groupLeft(i)+(slot-barWidth)/2;
   const xTarget=i=>groupLeft(i)+slot+(slot-barWidth)/2;
-  const statusOf=d=>!d.target?'none':d.actual>=d.target?'good':'bad';
+  const statusOf=d=>!d.target?'none':statusTone(d.actual/d.target);
   const bars=daily.map((d,i)=>{
     const status=statusOf(d);
-    const actualCls=status==='good'?'daily-bar-good':status==='bad'?'daily-bar-bad':'daily-bar-none';
+    const actualCls=status==='good'?'daily-bar-good':status==='warning'?'daily-bar-warn':status==='bad'?'daily-bar-bad':'daily-bar-none';
     const actualTop=y(d.actual),actualH=Math.max(0,baseline-actualTop);
     const targetTop=y(d.target),targetH=Math.max(0,baseline-targetTop);
     const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${formatDateAR(d.date)} · Venta real: ${money(d.actual)}</title></path>`:'';
     const targetPath=d.target>0?`<path class="daily-bar daily-bar-target" data-day="${i}" d="${roundedTopBarPath(xTarget(i),targetTop,barWidth,targetH,4)}"><title>${formatDateAR(d.date)} · Objetivo: ${money(d.target)}</title></path>`:'';
     return actualPath+targetPath;
   }).join('');
-  const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--red)"></i>Día bajo objetivo</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
+  const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--amber)"></i>85% a 99%</span><span><i class="legend-swatch" style="background:var(--red)"></i>Menos de 85%</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
   const first=daily[0],last=daily[daily.length-1];
   container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${daily.length} día${daily.length===1?'':'s'}</span><span>${formatDateShortAR(last.date)}</span></div>`;
   attachDailyHover(container,daily,groupCenter);
@@ -3279,7 +3288,11 @@ function renderTable(id,rows,columns,transform){
     // "num" va SIEMPRE junto al tono en las dos columnas de desvío (no uno u otro) — mismo patrón
     // que ya usan seasonMonthTable/renderStoreProjectionChart para las suyas; sin las dos clases
     // juntas se quedaban sin el blanco+alineación a la derecha del resto de números.
-    const cls=(label==='Desvío'||isDeltaPct)?(sinValor?'num':`num ${value>=0?'positive':'negative'}`):isNumericLabel(label)?'num':'';
+    // Las dos columnas de desvío se pintan por el % cumplido del día (regla general, ver statusTone):
+    // una fila a -5% es amarilla, no roja. Sin objetivo (sin __deltaPct) queda el signo.
+    const pctDia=row.__deltaPct;
+    const toneDesvio=pctDia!==null&&pctDia!==undefined?cumplClase(1+pctDia/100):(value>=0?'positive':'negative');
+    const cls=(label==='Desvío'||isDeltaPct)?(sinValor?'num':`num ${toneDesvio}`):isNumericLabel(label)?'num':'';
     return `<td class="${cls}">${isDeltaPct?(sinValor?'—':`${value>=0?'+':''}${percent(value)}`):isMoney?money(value):isPct?percent(value*100):isCount?number(value):isDate?formatDateAR(value):escapeHtml(value??'—')}</td>`;
   }).join('')}</tr>`).join('')||`<tr><td colspan="${columns.length}" class="empty-state">Sin datos para estos filtros</td></tr>`}</tbody>`;
   attachSortHeaders(id);
