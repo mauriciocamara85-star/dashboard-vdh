@@ -1093,14 +1093,41 @@ function renderRankGrandPrix(){
 // y Locales no tenía categorías propias (una sola vista, Copa Constructores). Liga/GP/Mejora eran
 // además pestañas de PRIMER nivel sueltas, mezcladas con Locales/Evolución en la misma barra.
 // Llena los selectores de mes y fecha (lo más nuevo arriba) y muestra solo los que usa la pestaña:
-// GP VDH y Copa Constructores son del mes, el resto de la fecha, y Evolución no usa ninguno.
+// GP VDH y Copa Constructores son del mes, el resto de la fecha. Evolución usa los mismos dos
+// selectores pero con su propia elección (ver renderEvoPeriodSelectors).
 function renderRankPeriodSelectors(){
+  if(state.rankScope==='evolution'){renderEvoPeriodSelectors();return}
+  const etiquetaSemana=$('rankWeekField').querySelector('span');if(etiquetaSemana)etiquetaSemana.textContent='Fecha';
   const mes=rankMesElegido(),semana=rankSemanaElegida();
   $('rankMonthSelect').innerHTML=rankMeses().slice().reverse().map(m=>`<option value="${escapeHtml(m)}"${m===mes?' selected':''}>${escapeHtml(m)}${mesEnCurso(m)?' (en curso)':''}</option>`).join('');
   $('rankWeekSelect').innerHTML=rankSemanasDelMes(mes).slice().reverse().map(w=>`<option value="${escapeHtml(w)}"${w===semana?' selected':''}>Fecha ${w.split('|')[1]}</option>`).join('');
   const mensual=(state.rankScope==='sellers'&&state.sellerCategory==='campeonato')||(state.rankScope==='stores'&&state.storeCategory==='constructores');
-  $('rankWeekField').hidden=mensual||state.rankScope==='evolution';
-  $('rankMonthField').hidden=state.rankScope==='evolution';
+  $('rankWeekField').hidden=mensual;
+  $('rankMonthField').hidden=false;
+}
+// ── Mes y Semana de Evolución (pedido 2026-10-07) ──
+// Elección aparte de la del resto del Ranking (state.evoMes/evoSemana): GP y Copa necesitan siempre
+// un mes, Evolución además puede mirar el semestre entero. "Todo el semestre" = todas las semanas
+// (lo que se veía antes); un mes = solo sus semanas; una semana = el día a día de esa semana.
+function evoMesElegido(){return rankMeses().includes(state.evoMes)?state.evoMes:'all'}
+function evoSemanaElegida(){const mes=evoMesElegido();return mes!=='all'&&rankSemanasDelMes(mes).includes(state.evoSemana)?state.evoSemana:'all'}
+// Hasta qué día hay datos para Evolución: el último día cargado. A propósito NO usa el período de
+// arriba (toDate), que en Ranking ni se ve: quedaría cortando la evolución sin que se note por qué.
+function corteEvolucion(){return lastLoadedDate('LOCAL_DIARIO')||todayKey()}
+// La semana que contiene el último día cargado, si todavía le quedan días por delante.
+function semanaEnCursoKey(){
+  const corte=corteEvolucion(),filas=state.tables.LOCAL_DIARIO||[];
+  const fila=filas.find(r=>normalizeDate(r.Fecha)===corte);if(!fila)return null;
+  const wk=weekKeyOf(fila);
+  return filas.some(r=>weekKeyOf(r)===wk&&normalizeDate(r.Fecha)>corte)?wk:null;
+}
+function renderEvoPeriodSelectors(){
+  const mes=evoMesElegido(),semana=evoSemanaElegida(),enCurso=semanaEnCursoKey();
+  $('rankMonthSelect').innerHTML='<option value="all">Todo el semestre</option>'+rankMeses().slice().reverse().map(m=>`<option value="${escapeHtml(m)}"${m===mes?' selected':''}>${escapeHtml(m)}${mesEnCurso(m)?' (en curso)':''}</option>`).join('');
+  $('rankWeekSelect').innerHTML=mes==='all'?'':'<option value="all">Todas las semanas</option>'+rankSemanasDelMes(mes).slice().reverse().map(w=>`<option value="${escapeHtml(w)}"${w===semana?' selected':''}>Semana ${w.split('|')[1]}${w===enCurso?' (en curso)':''}</option>`).join('');
+  const etiquetaSemana=$('rankWeekField').querySelector('span');if(etiquetaSemana)etiquetaSemana.textContent='Semana';
+  $('rankMonthField').hidden=false;
+  $('rankWeekField').hidden=mes==='all';
 }
 function renderRanking(){
   renderRankPeriodSelectors();
@@ -1228,12 +1255,18 @@ function vendorHistory(){
   // auditoría 2026-09-05). `locales` junta la unión de todos los locales vistos en el período para
   // mostrarla en el encabezado de Evolución.
   const rows=fusionarVendedoresCompartidos(rawRows);
+  // La semana en curso venía en VENDEDOR_SEMANAL con el objetivo de los 7 días contra la venta de
+  // los días que ya pasaron: el martes daba 30% y "−76 pts de mejora" a cualquiera (Morón, Semana 2
+  // de Octubre, 2026-10-07). Ahora se compara contra el objetivo hasta el último día cargado, con
+  // el reparto por día de VENDEDOR_DIARIO. Semanas cerradas: igual que siempre.
+  const avance=avanceDeSemanas(r=>local==='all'?r.Vendedor:`${r.Vendedor}|${r.Local}`,corteEvolucion());
   const groups={};
   rows.forEach(row=>{
-    const key=row.Vendedor,obj=num(row,'Venta obj');
+    const key=row.Vendedor,wk=weekKeyOf(row),f=avance(local==='all'?key:`${key}|${local}`,wk),obj=num(row,'Venta obj')*f;
+    if(f<=0)return;
     if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),weeks:[]};
     row.Local.split(' + ').forEach(l=>groups[key].locales.add(l));
-    groups[key].weeks.push({weekKey:weekKeyOf(row),ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
+    groups[key].weeks.push({weekKey:wk,enCurso:f<1,ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
   });
   return Object.values(groups).map(g=>{
     g.weeks.sort((a,b)=>weekKeyOrder(a.weekKey)-weekKeyOrder(b.weekKey));
@@ -1255,11 +1288,13 @@ function localHistory(){
     const conv=convRate(row,'Conv real');if(conv){w.convSum+=conv;w.convCount++}
     const pxt=num(row,'PxT real');if(pxt){w.pxtSum+=pxt;w.pxtCount++}
   });
+  // Semana en curso contra el objetivo a la fecha — mismo motivo que en vendorHistory.
+  const avance=avanceDeSemanas(r=>seller==='all'?String(r.Local??''):`${r.Local}|${r.Vendedor}`,corteEvolucion());
   return Object.keys(groups).map(loc=>{
     const weeks=Object.keys(groups[loc]).sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b)).map(wk=>{
-      const w=groups[loc][wk];
-      return{weekKey:wk,ratio:w.target?w.actual/w.target*100:null,tp:w.tpCount?w.tpSum/w.tpCount:0,conv:w.convCount?w.convSum/w.convCount:0,pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
-    });
+      const w=groups[loc][wk],f=avance(seller==='all'?loc:`${loc}|${seller}`,wk),obj=w.target*f;
+      return{weekKey:wk,f,enCurso:f<1,ratio:obj?w.actual/obj*100:null,tp:w.tpCount?w.tpSum/w.tpCount:0,conv:w.convCount?w.convSum/w.convCount:0,pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
+    }).filter(w=>w.f>0);
     return{local:loc,weeks};
   });
 }
@@ -1393,8 +1428,9 @@ function renderRankBadges(){
 
   $('badgesRecords').innerHTML=records.length?records.map(r=>{const meta=metricMeta[r.metric];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.local)} · nuevo récord de ${meta.label}</span></div><span class="badge-value">${meta.fmt(r.value)}</span></div>`}).join(''):'<div class="empty-state">Todavía no hay récords personales — hace falta más de una semana cargada</div>';
 }
-function evolutionChartSvg(weeks){
-  const points=weeks.map((w,i)=>({...w,i}));
+// points: [{ratio, etiqueta (tooltip), corto (eje)}] — semanas o días; unidad: "última semana"/"último día".
+function evolutionChartSvg(puntos,unidad){
+  const points=puntos.map((p,i)=>({...p,i}));
   const withRatio=points.filter(p=>p.ratio!==null);
   if(!withRatio.length)return '<div class="empty-state">Sin objetivo cargado para graficar</div>';
   const w=760,h=190;
@@ -1402,12 +1438,11 @@ function evolutionChartSvg(weeks){
   const x=i=>points.length>1?(i/(points.length-1))*w:w/2;
   const y=v=>h-(v/maxVal)*(h-6)-3;
   const path=withRatio.length>1?withRatio.map((p,idx)=>`${idx===0?'M':'L'}${x(p.i).toFixed(1)},${y(p.ratio).toFixed(1)}`).join(' '):'';
-  const dots=withRatio.map(p=>{const [mes,sem]=p.weekKey.split('|');return `<circle class="line-dot" cx="${x(p.i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="4"><title>${percent(p.ratio)} · Semana ${sem} de ${mes}</title></circle>`}).join('');
+  const dots=withRatio.map(p=>`<circle class="line-dot" cx="${x(p.i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="4"><title>${percent(p.ratio)} · ${escapeHtml(p.etiqueta)}</title></circle>`).join('');
   const targetY=y(100).toFixed(1);
   const first=points[0],last=points[points.length-1];
-  const [firstMes,firstSem]=first.weekKey.split('|'),[lastMes,lastSem]=last.weekKey.split('|');
-  const lastRatioLabel=last.ratio!==null?`${percent(last.ratio)} última semana`:'sin objetivo la última semana';
-  return `<div class="chart-legend"><span><i class="legend-swatch" style="background:#52657d"></i>Objetivo (100%)</span><span><i class="legend-swatch" style="background:#F97316"></i>% cumplimiento</span></div><svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" stroke="#52657d" stroke-dasharray="6 5" stroke-width="2"></line>${path?`<path class="line-actual" d="${path}"></path>`:''}${dots}</svg><div class="line-axis"><span>S${firstSem} ${firstMes}</span><span>${lastRatioLabel}</span><span>S${lastSem} ${lastMes}</span></div>`;
+  const lastRatioLabel=last.ratio!==null?`${percent(last.ratio)} ${unidad}`:`sin objetivo ${unidad==='último día'?'el último día':'la última semana'}`;
+  return `<div class="chart-legend"><span><i class="legend-swatch" style="background:#52657d"></i>Objetivo (100%)</span><span><i class="legend-swatch" style="background:#F97316"></i>% cumplimiento</span></div><svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" stroke="#52657d" stroke-dasharray="6 5" stroke-width="2"></line>${path?`<path class="line-actual" d="${path}"></path>`:''}${dots}</svg><div class="line-axis"><span>${escapeHtml(first.corto)}</span><span>${lastRatioLabel}</span><span>${escapeHtml(last.corto)}</span></div>`;
 }
 function showEvolutionEmpty(badgeText,message){
   $('rankingPeriodBadge').textContent=badgeText;
@@ -1431,52 +1466,130 @@ function renderEvolutionSeller(){
   const histories=vendorHistory();
   const person=histories[0];
   if(!person||!person.weeks.length){showEvolutionEmpty('Sin semanas','Sin datos de VENDEDOR_SEMANAL para este vendedor todavía.');return}
-  renderEvolutionWeeks(person.weeks,`${person.name} · ${person.local}`);
+  renderEvolutionPeriodo(person.weeks,`${person.name} · ${person.local}`,'este vendedor');
 }
 function renderEvolutionLocal(){
   const local=$('localFilter').value;
   if(local==='all'){showEvolutionEmpty('Elegí un local','Elegí un local en el filtro "Local" de arriba para ver su evolución semanal.');return}
   const store=localHistory()[0];
   if(!store||!store.weeks.length){showEvolutionEmpty('Sin semanas','Sin datos de VENDEDOR_SEMANAL para este local todavía.');return}
-  renderEvolutionWeeks(store.weeks,store.local);
+  renderEvolutionPeriodo(store.weeks,store.local,'este local');
 }
-function renderEvolutionWeeks(weeks,heading){
+function renderEvolutionPeriodo(weeks,heading,quien){
+  const mes=evoMesElegido(),semana=evoSemanaElegida();
+  if(semana!=='all'){
+    const [m,n]=semana.split('|'),dias=diasDeLaSemana(semana);
+    if(!dias.length){showEvolutionEmpty('Sin días cargados',`Sin ventas cargadas para ${quien} en la Semana ${n} de ${m}.`);return}
+    renderEvolutionDias(dias,weeks,semana,heading);return;
+  }
+  const visibles=mes==='all'?weeks:weeks.filter(w=>w.weekKey.split('|')[0]===mes);
+  if(!visibles.length){showEvolutionEmpty('Sin semanas',`Sin semanas de ${mes} para ${quien}.`);return}
+  renderEvolutionWeeks(visibles,weeks,heading,quien,mes);
+}
+// Títulos del panel según se miren semanas o días. Con guarda por si el index.html en caché todavía
+// es el de antes de estos ids: mejor un título viejo que la sección entera en blanco.
+function evolutionTextos(t){
+  [['evolutionKicker',t.kicker],['evolutionChartTitle',t.grafico],['evolutionSideKicker',t.ladoKicker],['evolutionSideTitle',t.lado],['evolutionTableTitle',t.tabla]].forEach(([id,texto])=>{const el=$(id);if(el)el.textContent=texto});
+}
+const enCursoHtml=w=>w.enCurso?'<small class="evo-en-curso">en curso · contra el objetivo a la fecha</small>':'';
+function renderEvolutionWeeks(weeks,todas,heading,quien,mes){
   $('evolutionEmpty').hidden=true;
   $('evolutionContent').hidden=false;
   $('evolutionHeading').textContent=heading;
-  const [lastMes,lastSemana]=weeks[weeks.length-1].weekKey.split('|');
-  $('rankingPeriodBadge').textContent=`${weeks.length} semana(s) registrada(s) · última: Semana ${lastSemana} de ${lastMes}`;
+  evolutionTextos({kicker:'EVOLUCIÓN SEMANAL',grafico:'Por semana',ladoKicker:'HITOS',lado:`De ${quien}`,tabla:'Semana a semana'});
+  const ultima=weeks[weeks.length-1],[lastMes,lastSemana]=ultima.weekKey.split('|');
+  $('rankingPeriodBadge').textContent=`${weeks.length} semana(s) ${mes==='all'?'registrada(s)':`de ${mes}`} · última: Semana ${lastSemana} de ${lastMes}${ultima.enCurso?' (en curso)':''}`;
 
-  const streak=streakInfo(weeks);
-  const withRatio=weeks.filter(w=>w.ratio!==null);
+  // Racha, récords y mejora miran el historial completo hasta la última semana que se ve: elegir
+  // Octubre no corta una racha que viene de Septiembre ni deja a la Semana 1 sin "mejora".
+  // La semana en curso se ve en el gráfico y la tabla, pero NO entra en racha, mejor semana, mejora
+  // promedio ni récords: con 2 días cargados da cualquier cosa (Bren Nuñez: 656% por un lunes de
+  // $376.000 contra $26.735 de objetivo) y se comía las tarjetas de todo el semestre.
+  const hasta=todas.slice(0,todas.indexOf(ultima)+1),cerradas=hasta.filter(w=>!w.enCurso);
+  const visiblesCerradas=weeks.filter(w=>!w.enCurso),hayEnCurso=visiblesCerradas.length<weeks.length;
+  const mejoraDe=w=>{const i=todas.indexOf(w),prev=i>0?todas[i-1]:null;return(prev&&w.ratio!==null&&prev.ratio!==null)?w.ratio-prev.ratio:null};
+  const streak=streakInfo(cerradas);
+  const withRatio=visiblesCerradas.filter(w=>w.ratio!==null);
   const best=withRatio.length?withRatio.reduce((a,b)=>b.ratio>a.ratio?b:a):null;
-  const mejoras=[];
-  for(let i=1;i<weeks.length;i++){if(weeks[i].ratio!==null&&weeks[i-1].ratio!==null)mejoras.push(weeks[i].ratio-weeks[i-1].ratio)}
+  const mejoras=visiblesCerradas.map(mejoraDe).filter(v=>v!==null);
   const avgMejora=mejoras.length?mejoras.reduce((sum,v)=>sum+v,0)/mejoras.length:null;
-  const rec=weeks.length>1?personalRecords(weeks):null;
+  const rec=cerradas.length>1?personalRecords(cerradas):null;
   const recordBadges=rec?Object.keys(rec).filter(m=>rec[m].isRecord):[];
+  const ultimaCerrada=cerradas.length?cerradas[cerradas.length-1].weekKey.split('|'):null;
+  const semanaRecord=ultimaCerrada?`Semana ${ultimaCerrada[1]} de ${ultimaCerrada[0]}`:'';
 
   $('evolutionMetrics').innerHTML=
-    metricsCard('Semanas registradas',number(weeks.length),'en VENDEDOR_SEMANAL')+
+    metricsCard('Semanas registradas',number(weeks.length),mes==='all'?'en VENDEDOR_SEMANAL':`en ${escapeHtml(mes)}`)+
     metricsCard('Racha actual',streak>0?`${streak} semana(s)`:'—',streak>0?'en objetivo consecutivo':'sin racha activa',streak>=3?'good':'')+
-    (best?metricsCard('Mejor semana',percent(best.ratio),best.weekKey.replace('|',' · Semana '),best.ratio>=100?'good':''):metricsCard('Mejor semana','—',''))+
-    metricsCard('Mejora promedio',avgMejora!==null?`${avgMejora>=0?'+':''}${avgMejora.toFixed(1)} pts`:'—',avgMejora!==null?'entre semanas consecutivas':'esperando 2ª semana',avgMejora!==null?(avgMejora>=0?'good':'bad'):'');
+    (best?metricsCard('Mejor semana',percent(best.ratio),best.weekKey.replace('|',' · Semana '),best.ratio>=100?'good':''):metricsCard('Mejor semana','—',hayEnCurso?'la semana todavía está en curso':''))+
+    metricsCard('Mejora promedio',avgMejora!==null?`${avgMejora>=0?'+':''}${avgMejora.toFixed(1)} pts`:'—',avgMejora!==null?(hayEnCurso?'entre semanas cerradas':'entre semanas consecutivas'):(hayEnCurso&&!visiblesCerradas.length?'la semana todavía está en curso':'esperando 2ª semana'),avgMejora!==null?(avgMejora>=0?'good':'bad'):'');
 
-  $('evolutionChart').innerHTML=evolutionChartSvg(weeks);
+  $('evolutionChart').innerHTML=evolutionChartSvg(weeks.map(w=>{const [m,n]=w.weekKey.split('|');return{ratio:w.ratio,etiqueta:`Semana ${n} de ${m}${w.enCurso?' (en curso)':''}`,corto:`S${n} ${m}`}}),'última semana');
 
-  const rows=weeks.map((w,i)=>{
-    const prev=i>0?weeks[i-1]:null;
-    const mejora=(prev&&w.ratio!==null&&prev.ratio!==null)?w.ratio-prev.ratio:null;
+  const rows=weeks.map(w=>{
+    const mejora=mejoraDe(w);
     const [mes,semana]=w.weekKey.split('|');
     // w.conv ya viene como fracción (convRate en vendorHistory) — hay que *100 para mostrarlo como
     // el resto del dashboard; antes se mostraba crudo (bug real, auditoría 2026-09-06).
-    return `<tr><td class="seller-name">Semana ${semana} de ${mes}</td><td class="num">${w.ratio!==null?percent(w.ratio):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${mejora!==null?`<span class="${mejora>=0?'positive':'negative'}">${mejora>=0?'+':''}${mejora.toFixed(1)} pts</span>`:'—'}</td><td class="num">${w.tp?money(w.tp):'—'}</td><td class="num">${w.conv?percent(w.conv*100):'—'}</td><td class="num">${w.pxt?number(w.pxt):'—'}</td></tr>`;
+    return `<tr><td class="seller-name">Semana ${semana} de ${mes}${enCursoHtml(w)}</td><td class="num">${w.ratio!==null?`<span class="${cumplClase(w.ratio/100)}">${percent(w.ratio)}</span>`:'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${mejora!==null?`<span class="${mejora>=0?'positive':'negative'}">${mejora>=0?'+':''}${mejora.toFixed(1)} pts</span>`:'—'}</td><td class="num">${w.tp?money(w.tp):'—'}</td><td class="num">${w.conv?percent(w.conv*100):'—'}</td><td class="num">${w.pxt?pxtTexto(w.pxt,1):'—'}</td></tr>`;
   }).join('');
   $('evolutionTable').innerHTML=`<thead><tr><th>Semana</th><th class="align-right">% cumplimiento</th><th class="align-right">Mejora</th><th class="align-right">Ticket prom.</th><th class="align-right">Conversión</th><th class="align-right">PxT</th></tr></thead><tbody>${rows}</tbody>`;
 
   // fmt de conv multiplica por 100 — mismo motivo que metricMeta más arriba (auditoría 2026-09-06).
   const badgeMeta={tp:{label:'Ticket promedio',icon:'tag',fmt:money},conv:{label:'Conversión',icon:'target',fmt:v=>percent(v*100)},pxt:{label:'PxT',icon:'shirt',fmt:v=>pxtTexto(v,1)}};
-  $('evolutionBadges').innerHTML=recordBadges.length?recordBadges.map(m=>{const meta=badgeMeta[m];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>Récord de ${meta.label}</strong><span>esta semana</span></div><span class="badge-value">${meta.fmt(rec[m].value)}</span></div>`}).join(''):'<div class="empty-state">Sin récords nuevos esta semana</div>';
+  $('evolutionBadges').innerHTML=recordBadges.length?recordBadges.map(m=>{const meta=badgeMeta[m];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>Récord de ${meta.label}</strong><span>${semanaRecord}</span></div><span class="badge-value">${meta.fmt(rec[m].value)}</span></div>`}).join(''):`<div class="empty-state">${semanaRecord?`Sin récords nuevos en la ${semanaRecord}`:'Sin semanas cerradas todavía'}</div>`;
+}
+// Día a día de una semana, desde VENDEDOR_DIARIO (venta y objetivo de cada día, tal cual la planilla),
+// con los mismos filtros de Local/Vendedor que los historiales semanales. Solo hasta el último día
+// cargado, y sin los días en que la persona no tenía objetivo ni vendió (franco).
+function diasDeLaSemana(weekKey){
+  const local=$('localFilter').value,seller=$('sellerFilter').value,corte=corteEvolucion(),dias={};
+  (state.tables.VENDEDOR_DIARIO||[]).filter(r=>weekKeyOf(r)===weekKey&&(local==='all'||String(r.Local??'')===local)&&(seller==='all'||String(r.Vendedor??'')===seller)).forEach(r=>{
+    const fecha=normalizeDate(r.Fecha);if(!fecha||fecha>corte)return;
+    const d=dias[fecha]||(dias[fecha]={fecha,dia:String(r['Día']??'').trim()||diaCortoDe(fecha),venta:0,objetivo:0});
+    d.venta+=num(r,'Venta real');d.objetivo+=num(r,'Objetivo del día');
+  });
+  return Object.values(dias).filter(d=>d.venta||d.objetivo).sort((a,b)=>a.fecha<b.fecha?-1:1).map(d=>({...d,ratio:d.objetivo?d.venta/d.objetivo*100:null}));
+}
+function renderEvolutionDias(dias,weeks,semana,heading){
+  $('evolutionEmpty').hidden=true;
+  $('evolutionContent').hidden=false;
+  const [mes,n]=semana.split('|'),enCurso=semana===semanaEnCursoKey();
+  $('evolutionHeading').textContent=`${heading} · Semana ${n} de ${mes}`;
+  evolutionTextos({kicker:'EVOLUCIÓN DIARIA',grafico:'Por día',ladoKicker:'LA SEMANA',lado:'Indicadores de la semana',tabla:'Día a día'});
+  $('rankingPeriodBadge').textContent=`Semana ${n} de ${mes} · ${dias.length} día(s) cargado(s)${enCurso?' · en curso':''}`;
+
+  const venta=dias.reduce((a,d)=>a+d.venta,0),objetivo=dias.reduce((a,d)=>a+d.objetivo,0),ratio=objetivo?venta/objetivo*100:null;
+  const conObjetivo=dias.filter(d=>d.ratio!==null);
+  const best=conObjetivo.length?conObjetivo.reduce((a,b)=>b.ratio>a.ratio?b:a):null;
+  const enObjetivo=conObjetivo.filter(d=>d.ratio>=100).length;
+  $('evolutionMetrics').innerHTML=
+    metricsCard('Venta de la semana',money(venta),objetivo?`objetivo ${money(objetivo)}${enCurso?' a la fecha':''}`:'sin objetivo cargado')+
+    metricsCard('% cumplimiento',ratio!==null?percent(ratio):'—',ratio===null?'':ratio>=100?'en objetivo':`faltan ${money(objetivo-venta)}`,ratio!==null?statusTone(ratio/100):'')+
+    (best?metricsCard('Mejor día',percent(best.ratio),`${escapeHtml(best.dia)} ${formatDateShortAR(best.fecha)}`,statusTone(best.ratio/100)):metricsCard('Mejor día','—',''))+
+    metricsCard('Días en objetivo',`${enObjetivo} de ${conObjetivo.length}`,'días con 100% o más',conObjetivo.length&&enObjetivo===conObjetivo.length?'good':'');
+
+  $('evolutionChart').innerHTML=evolutionChartSvg(dias.map(d=>({ratio:d.ratio,etiqueta:`${d.dia} ${formatDateShortAR(d.fecha)}`,corto:`${diaCortoDe(d.fecha)} ${formatDateShortAR(d.fecha)}`})),'último día');
+
+  const rows=dias.map(d=>{
+    const desvio=d.venta-d.objetivo;
+    return `<tr><td class="seller-name">${escapeHtml(d.dia)} ${formatDateShortAR(d.fecha)}</td><td class="num">${money(d.venta)}</td><td class="num">${d.objetivo?money(d.objetivo):'<span class="missing-value">Sin objetivo</span>'}</td><td class="num">${d.ratio!==null?`<span class="${cumplClase(d.ratio/100)}">${percent(d.ratio)}</span>`:'—'}</td><td class="num">${d.objetivo?`<span class="${desvio>=0?'positive':'negative'}">${desvio>=0?'+':'−'}${money(Math.abs(desvio))}</span>`:'—'}</td></tr>`;
+  }).join('');
+  $('evolutionTable').innerHTML=`<thead><tr><th>Día</th><th class="align-right">Venta real</th><th class="align-right">Objetivo</th><th class="align-right">% cumplimiento</th><th class="align-right">Desvío</th></tr></thead><tbody>${rows}</tbody>`;
+
+  // Ticket, conversión y PxT se cargan por semana (VENDEDOR_SEMANAL), no por día: van al costado,
+  // contra la semana anterior.
+  const i=weeks.findIndex(w=>w.weekKey===semana),w=i>=0?weeks[i]:null,prev=i>0?weeks[i-1]:null;
+  const indicadores=[
+    {label:'Ticket promedio',icon:'tag',key:'tp',fmt:money},
+    {label:'Conversión',icon:'target',key:'conv',fmt:v=>percent(v*100)},
+    {label:'PxT',icon:'shirt',key:'pxt',fmt:v=>pxtTexto(v,1)}
+  ].filter(m=>w&&w[m.key]);
+  $('evolutionBadges').innerHTML=indicadores.length?indicadores.map(m=>{
+    const antes=prev&&prev[m.key]?prev[m.key]:null;
+    const sub=antes?`<span class="${w[m.key]>=antes?'positive':'negative'}">${w[m.key]>=antes?'▲':'▼'}</span> vs. ${m.fmt(antes)} la semana anterior`:'sin semana anterior para comparar';
+    return `<div class="badge-row"><span class="badge-icon">${icon(m.icon)}</span><div class="badge-info"><strong>${m.label}</strong><span>${sub}</span></div><span class="badge-value">${m.fmt(w[m.key])}</span></div>`;
+  }).join(''):'<div class="empty-state">Sin ticket, conversión ni PxT cargados esta semana</div>';
 }
 function renderRankMejora(){
   const {rows}=currentWeekRowsPersonas();
@@ -1725,13 +1838,20 @@ function weeklyComplianceByVendedor(month){
 // objetivo de venta es el que ya carga la planilla, así que refleja qué días se espera más gente.
 // Semana cerrada = 1. Sin datos diarios = 1 (nunca se inventa un recorte).
 function fraccionSemanaTranscurrida(){
-  const corte=objectiveCutoff(),acc={};
+  const avance=avanceDeSemanas(r=>`${r.Vendedor}|${r.Local}`,objectiveCutoff());
+  return(vendedor,local,weekKey)=>avance(`${vendedor}|${local}`,weekKey);
+}
+// Lo mismo con cualquier agrupación (claveDe arma la clave desde una fila de VENDEDOR_DIARIO):
+// devuelve f(clave, weekKey) → fracción de 0 a 1 del objetivo de venta de esa semana que cae hasta
+// el corte. 0 = la semana todavía no empezó; sin datos diarios = 1.
+function avanceDeSemanas(claveDe,corte){
+  const acc={};
   (state.tables.VENDEDOR_DIARIO||[]).forEach(r=>{
-    const k=`${r.Vendedor}|${r.Local}|${weekKeyOf(r)}`,o=num(r,'Objetivo del día');
+    const k=`${claveDe(r)}|${weekKeyOf(r)}`,o=num(r,'Objetivo del día');
     const e=acc[k]||(acc[k]={total:0,hasta:0});
     e.total+=o;if(String(r.Fecha??'').slice(0,10)<=corte)e.hasta+=o;
   });
-  return(vendedor,local,weekKey)=>{const e=acc[`${vendedor}|${local}|${weekKey}`];return e&&e.total>0?e.hasta/e.total:1};
+  return(clave,weekKey)=>{const e=acc[`${clave}|${weekKey}`];return e&&e.total>0?e.hasta/e.total:1};
 }
 function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};
   const fraccionSemana=fraccionSemanaTranscurrida();
@@ -3904,8 +4024,8 @@ initPeriodPicker();
 applyPeriodPreset(PERIODO_POR_DEFECTO,false);
 // Cambiar de mes vuelve a la última fecha de ese mes.
 engancharSaludModal();   // "Ver detalle" de Salud de locales y del equipo
-$('rankMonthSelect').addEventListener('change',e=>{state.rankMonth=e.target.value;state.rankWeek=null;renderRanking()});
-$('rankWeekSelect').addEventListener('change',e=>{state.rankWeek=e.target.value;renderRanking()});
+$('rankMonthSelect').addEventListener('change',e=>{if(state.rankScope==='evolution'){state.evoMes=e.target.value;state.evoSemana='all'}else{state.rankMonth=e.target.value;state.rankWeek=null}renderRanking()});
+$('rankWeekSelect').addEventListener('change',e=>{if(state.rankScope==='evolution')state.evoSemana=e.target.value;else state.rankWeek=e.target.value;renderRanking()});
 scheduleRefresh();loadData();
 
 // Detecta cuando hay una versión nueva del sitio ya publicada (el SW la baja solo en segundo

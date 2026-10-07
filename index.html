@@ -161,13 +161,13 @@
           <div class="rank-sort-toggle" id="evolutionScopeToggle" role="group" aria-label="Evolución de"><button class="rank-tab-sm active" data-evoscope="seller">Vendedor</button><button class="rank-tab-sm" data-evoscope="local">Local</button></div>
           <div id="evolutionEmpty" class="empty-state">Elegí un vendedor en el filtro "Vendedor" de arriba para ver su evolución semanal.</div>
           <div id="evolutionContent" hidden>
-            <div class="panel-head"><div><span class="section-kicker">EVOLUCIÓN SEMANAL</span><h2 id="evolutionHeading">Vendedor</h2></div></div>
+            <div class="panel-head"><div><span class="section-kicker" id="evolutionKicker">EVOLUCIÓN SEMANAL</span><h2 id="evolutionHeading">Vendedor</h2></div></div>
             <div class="metric-grid" id="evolutionMetrics"></div>
             <div class="split-grid">
-              <article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">% CUMPLIMIENTO</span><h2>Por semana</h2></div></div><div id="evolutionChart" class="bar-chart"></div></article>
-              <article class="panel"><div class="panel-head"><div><span class="section-kicker">HITOS</span><h2>De este vendedor</h2></div></div><div id="evolutionBadges" class="badge-panel empty-state">Sin datos</div></article>
+              <article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">% CUMPLIMIENTO</span><h2 id="evolutionChartTitle">Por semana</h2></div></div><div id="evolutionChart" class="bar-chart"></div></article>
+              <article class="panel"><div class="panel-head"><div><span class="section-kicker" id="evolutionSideKicker">HITOS</span><h2 id="evolutionSideTitle">De este vendedor</h2></div></div><div id="evolutionBadges" class="badge-panel empty-state">Sin datos</div></article>
             </div>
-            <article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE</span><h2>Semana a semana</h2></div></div><div class="table-wrap"><table id="evolutionTable" class="table-wide"></table></div></article>
+            <article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE</span><h2 id="evolutionTableTitle">Semana a semana</h2></div></div><div class="table-wrap"><table id="evolutionTable" class="table-wide"></table></div></article>
           </div>
         </div>
         <div id="rankGpPanel" hidden>

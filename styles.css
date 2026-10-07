@@ -1163,3 +1163,4 @@ tr.gp-detail>td{background:var(--ink);padding:10px 16px 14px}
 .payment-flow-bar{display:flex;width:100%;height:14px;border-radius:var(--radius-pill);overflow:hidden;background:var(--ink);gap:2px}
 .payment-flow-seg{height:100%;min-width:2px}
 @media(max-width:720px){.payment-breakdown{grid-template-columns:1fr}.payment-kpi-grid{grid-template-columns:1fr}}
+.evo-en-curso{display:block;margin-top:2px;color:var(--muted);font:500 11px var(--sans);letter-spacing:0}
