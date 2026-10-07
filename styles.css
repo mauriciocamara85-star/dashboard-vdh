@@ -1223,3 +1223,7 @@ html[data-theme="light"]{--comp:#7C3AED}
 .comp-aviso{margin:6px 6px 0;max-width:290px;font-size:11.5px;line-height:1.45;color:var(--amber)}
 .comp-tip{margin:8px 6px 0;max-width:290px;font-size:11px;line-height:1.45;color:var(--muted)}
 .comp-quitar{margin-right:auto}
+.chart-tooltip-pesos{font-weight:500;color:var(--muted);font-size:.92em}
+/* Colores de desvío dentro de los cuadritos de detalle (verde/rojo; el amarillo ya es global) */
+.chart-tooltip .good{color:var(--mint)}
+.chart-tooltip .bad{color:var(--red)}

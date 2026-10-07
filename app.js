@@ -2466,13 +2466,21 @@ function attachChartHover(container,cfg){
     guide.setAttribute('x1',px.toFixed(1));guide.setAttribute('x2',px.toFixed(1));guide.style.display='block';
     const rows=[];
     const place=(dot,value,label,color)=>{if(value===null||value===undefined){if(dot)dot.style.display='none';return}rows.push({label,color,value});if(dot){dot.setAttribute('cx',px.toFixed(1));dot.setAttribute('cy',cfg.y(value).toFixed(1));dot.style.display='block'}};
-    place(dotTarget,hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumTarget',hoverDate):null,'Ritmo objetivo','#52657d');
-    place(dotActual,hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumActual',hoverDate):null,'Ventas reales',cfg.color||'#F97316');
+    const objetivoAl=hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumTarget',hoverDate):null,realAl=hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumActual',hoverDate):null;
+    place(dotTarget,objetivoAl,'Ritmo objetivo','#52657d');
+    place(dotActual,realAl,'Ventas reales',cfg.color||'#F97316');
     place(dotProjection,cfg.projection?projectionValueAt(hoverDate):null,'Proyección (FCDP)',cfg.color||'#F97316');
     const priorInRange=cfg.priorSeries?.length&&hoverDate<=cfg.priorSeries[cfg.priorSeries.length-1].date;
     place(dotPrior,priorInRange?valueAtStep(cfg.priorSeries,'cumActual',hoverDate):null,cfg.priorLabel||'Historial',cfg.priorColor||'var(--muted)');
     if(!rows.length)return hide();
-    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(hoverDate)}</div>${rows.map(r=>`<div class="chart-tooltip-row"><i style="background:${r.color}"></i><span>${r.label}</span><strong>${money(r.value)}</strong></div>`).join('')}`;
+    // Desvío acumulado al día: en % (con el color del semáforo) y en pesos, debajo de "Ventas reales"
+    // (pedido 2026-10-07). Lo usan los dos gráficos acumulados, Resumen general y Locales.
+    const filasHtml=rows.map(r=>`<div class="chart-tooltip-row"><i style="background:${r.color}"></i><span>${r.label}</span><strong>${money(r.value)}</strong></div>`);
+    if(objetivoAl>0&&realAl!==null){
+      const d=realAl-objetivoAl,p=d/objetivoAl*100,despues=rows.findIndex(r=>r.label==='Ventas reales');
+      filasHtml.splice(despues+1,0,`<div class="chart-tooltip-row"><i style="background:transparent"></i><span>Desvío</span><strong><span class="${statusTone(realAl/objetivoAl)}">${p>=0?'+':'−'}${percent(Math.abs(p))}</span> <span class="chart-tooltip-pesos">${d>=0?'+':'−'}${money(Math.abs(d))}</span></strong></div>`);
+    }
+    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(hoverDate)}</div>${filasHtml.join('')}`;
     tooltipEl.hidden=false;
     tooltipEl.style.left=`${Math.min(92,Math.max(8,clientX/rect.width*100))}%`;
   };
