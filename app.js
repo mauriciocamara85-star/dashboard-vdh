@@ -357,7 +357,7 @@ function renderDiagnosisPanel(containerId,avgConv,avgConvObj,hasConvObj,avgTicke
   else if(convGap!==null||ticketGap!==null)focusLine='Sin desvíos relevantes contra el objetivo.';
   container.innerHTML=diagnosisRow('Conversión',v=>percent(v*100),avgConv,avgConvObj,hasConvObj,false)+diagnosisRow('Ticket promedio',money,avgTicket,avgTicketObj,hasTicketObj,false)+(focusLine?`<div class="diagnosis-focus">${focusLine}</div>`:'');
 }
-// Agrupa LOCAL_DIARIO por local para la tabla de "Foco" (solo tiene sentido con el filtro en "Todos los locales").
+// Agrupa LOCAL_DIARIO por local para la tabla de "Foco" (todos los locales, o el elegido en el filtro).
 function computeStoreFocusRows(rows){
   const groups={};
   rows.forEach(row=>{
@@ -397,18 +397,12 @@ function focusTag(candidates){
   negative.sort((a,b)=>a.gap-b.gap);
   return{label:`${negative[0].label} ↓`,tone:'bad'};
 }
-// Vive en su propia pestaña "Foco" (ver storeViewTabs/applyStoreTab) — acá ya no se oculta el panel
-// entero según el filtro, solo tiene sentido con "Todos los locales" así que cuando no aplica se
-// explica por qué en vez de dejar la pestaña en blanco sin motivo aparente.
+// Vive en su propia pestaña "Foco" (ver storeViewTabs/applyStoreTab). Con "Todos los locales" lista
+// la red entera; con un local elegido, solo ese (antes pedía volver a "Todos los locales" y quedaba
+// vacía — pedido 2026-10-07). `rows` ya viene filtrado por local desde renderStores.
 function renderStoreFocus(rows){
-  const isAllLocales=$('localFilter').value==='all';
-  if(!isAllLocales){
-    $('storeFocusRowsCount').textContent='';
-    $('storeFocusTable').innerHTML='<tbody><tr><td class="empty-state">Elegí "Todos los locales" en el filtro de arriba para ver este análisis.</td></tr></tbody>';
-    return;
-  }
   const focusRows=computeStoreFocusRows(rows);
-  $('storeFocusRowsCount').textContent=`${focusRows.length} locales`;
+  $('storeFocusRowsCount').textContent=focusRows.length===1?'1 local':`${focusRows.length} locales`;
   $('storeFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Local</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th class="align-right">Tráfico</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="num">${r.trafficRatio!==null?percent(r.trafficRatio*100):number(r.traffic||0)}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
 }
 // ── Ventas por sucursal (pestaña propia de Locales) ─────────────────────────────
@@ -648,12 +642,19 @@ function localObjetivoFor(local,month){
 }
 function computeSellerFocusRows(list,month){
   const cache={};
+  const objetivoDe=local=>cache[local]||(cache[local]=localObjetivoFor(local,month));
   return list.map(row=>{
     const avgConv=row.conversionAvg,avgTicket=row.ticketAvg;   // ya vienen ponderados
-    if(!cache[row.local])cache[row.local]=localObjetivoFor(row.local,month);
-    const obj=cache[row.local];
+    // El objetivo de conversión/ticket es del LOCAL: quien cubre dos ("Ituzaingó + Morón", algo que
+    // con "Todos los locales" sí aparece) toma el promedio de los locales donde trabajó. Con
+    // row.local combinado, localObjetivoFor no encontraba ninguno y quedaba sin objetivo.
+    const objs=[...(row.locales||[row.local])].map(objetivoDe);
+    const promedio=k=>{const v=objs.map(o=>o[k]).filter(Boolean);return v.length?v.reduce((a,b)=>a+b,0)/v.length:0};
+    const obj={convObj:promedio('convObj'),ticketObj:promedio('ticketObj')};
+    // Local "de cabecera" para agrupar en Foco con "Todos los locales": donde más vendió en el período.
+    const ventas=row.ventaPorLocal||{},principal=Object.keys(ventas).sort((a,b)=>ventas[b]-ventas[a]||a.localeCompare(b,'es'))[0]||row.local;
     return{
-      local:row.local,name:row.name,traffic:row.traffic,avgConv,avgTicket,
+      local:row.local,principal,name:row.name,traffic:row.traffic,avgConv,avgTicket,
       avgConvObj:obj.convObj,avgTicketObj:obj.ticketObj,trafficTarget:row.trafficTarget||0,
       trafficGapPct:row.trafficTarget?(row.traffic/row.trafficTarget-1)*100:null,
       convGapPct:obj.convObj?(avgConv-obj.convObj)/obj.convObj*100:null,
@@ -661,19 +662,30 @@ function computeSellerFocusRows(list,month){
     };
   });
 }
-// Vive en su propia pestaña "Foco" (ver sellerViewTabs/applySellerTab). Comparar vendedores tiene
-// sentido adentro de un mismo local (no mezclados de toda la red), así que solo aplica con un local
-// puntual filtrado — si no, se explica por qué en vez de dejar la pestaña en blanco.
+// Vive en su propia pestaña "Foco" (ver sellerViewTabs/applySellerTab). Con un local elegido, sus
+// vendedores. Con "Todos los locales", todos los vendedores de la red agrupados por local (antes
+// pedía elegir un local y quedaba vacía — pedido 2026-10-07): cada grupo con su encabezado y cuántos
+// tienen algo para mejorar, para seguir comparando a cada persona con los de SU local.
 function renderSellerFocus(list,month){
-  const showFocus=$('localFilter').value!=='all';
-  if(!showFocus){
-    $('sellerFocusRowsCount').textContent='';
-    $('sellerFocusTable').innerHTML='<tbody><tr><td class="empty-state">Elegí un local específico en el filtro de arriba para ver este análisis.</td></tr></tbody>';
-    return;
-  }
-  const focusRows=computeSellerFocusRows(list,month);
-  $('sellerFocusRowsCount').textContent=`${focusRows.length} vendedores`;
-  $('sellerFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Vendedor</th><th>Local</th><th class="align-right">Tráfico</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.name)}</td><td class="seller-location">${escapeHtml(r.local)}</td><td class="num">${number(r.traffic||0)}${r.trafficTarget?` · obj. ${number(Math.round(r.trafficTarget))}`:''}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="6" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
+  const todos=$('localFilter').value==='all';
+  const focusRows=computeSellerFocusRows(list,month).map(r=>({...r,tag:focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}])}));
+  const fila=r=>`<tr><td class="seller-name">${escapeHtml(r.name)}</td><td class="seller-location">${escapeHtml(r.local)}</td><td class="num">${number(r.traffic||0)}${r.trafficTarget?` · obj. ${number(Math.round(r.trafficTarget))}`:''}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="${r.tag.tone}">${r.tag.label}</td></tr>`;
+  let cuerpo;
+  if(todos){
+    // Orden de la tabla de detalle dentro de cada local (sortSellerDetail ya ordenó `list`). Quien
+    // cubre dos locales va en el grupo de donde más vendió (r.principal), no en un grupo aparte
+    // "Flores + Villa Del Parque"; su columna Local sigue mostrando los dos.
+    const grupos=new Map();
+    focusRows.forEach(r=>{if(!grupos.has(r.principal))grupos.set(r.principal,[]);grupos.get(r.principal).push(r)});
+    cuerpo=[...grupos.keys()].sort((a,b)=>a.localeCompare(b,'es')).map(local=>{
+      const gente=grupos.get(local),aMejorar=gente.filter(r=>r.tag.tone!=='good').length;
+      const resumen=`${gente.length} ${gente.length===1?'vendedor':'vendedores'} · ${aMejorar?`<span class="negative">${aMejorar} con foco</span>`:'<span class="positive">todos OK</span>'}`;
+      return `<tr class="focus-group"><td colspan="6"><strong>${escapeHtml(local)}</strong><span>${resumen}</span></td></tr>${gente.map(fila).join('')}`;
+    }).join('');
+  }else cuerpo=focusRows.map(fila).join('');
+  const locales=new Set(focusRows.map(r=>r.principal)).size;
+  $('sellerFocusRowsCount').textContent=todos&&focusRows.length?`${focusRows.length} vendedores · ${locales} ${locales===1?'local':'locales'}`:`${focusRows.length} vendedores`;
+  $('sellerFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Vendedor</th><th>Local</th><th class="align-right">Tráfico</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th>Foco</th></tr></thead><tbody>${cuerpo}</tbody>`:'<tbody><tr><td colspan="6" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
 }
 // Pestañas "Resumen"/"Foco" de Locales y Métricas vendedores — mismo patrón que rankScopeTabs de
 // Ranking (tabs con data-tab + toggle de "active" y de paneles hidden), sin acoplarlas entre sí:
@@ -1862,9 +1874,10 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   // romper localObjetivoFor() más abajo, que necesita el nombre exacto de un local de LOCAL_DIARIO.
   rows.forEach(row=>{
     const key=row.Vendedor;
-    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,trafficTarget:0,pond:nuevoPonderado(),count:0};
+    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),ventaPorLocal:{},sale:0,target:0,traffic:0,trafficTarget:0,pond:nuevoPonderado(),count:0};
     const group=groups[key];
     group.locales.add(row.Local);
+    group.ventaPorLocal[row.Local]=(group.ventaPorLocal[row.Local]||0)+num(row,'Venta real');
     group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');
     group.trafficTarget+=num(row,'Tráfico obj')*fraccionSemana(row.Vendedor,row.Local,weekKeyOf(row));
     sumarPonderado(group.pond,num(row,'Venta real'),num(row,'TP real'),num(row,'PxT real'),num(row,'Tráfico real'));

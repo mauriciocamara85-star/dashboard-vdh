@@ -1164,3 +1164,10 @@ tr.gp-detail>td{background:var(--ink);padding:10px 16px 14px}
 .payment-flow-seg{height:100%;min-width:2px}
 @media(max-width:720px){.payment-breakdown{grid-template-columns:1fr}.payment-kpi-grid{grid-template-columns:1fr}}
 .evo-en-curso{display:block;margin-top:2px;color:var(--muted);font:500 11px var(--sans);letter-spacing:0}
+.focus-group td{padding:14px 12px 8px;background:var(--row2);border-top:2px solid var(--line)}
+.focus-group td strong{font:700 13px var(--display);letter-spacing:.3px;color:var(--white);margin-right:12px}
+.focus-group td span{font-size:11px;color:var(--muted)}
+.focus-group td span span{font-size:inherit}
+html[data-theme="light"] .focus-group td strong{color:#1E3552}
+#sellerFocusTable td.good,#storeFocusTable td.good{color:var(--mint);font-weight:700}
+#sellerFocusTable td.bad,#storeFocusTable td.bad{color:var(--red);font-weight:700}
