@@ -2759,12 +2759,27 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
 }
 // ── COMPARACIÓN (solo Locales, pedido 2026-10-07) ───────────────────────────────────────────────
 // Compara el período elegido arriba contra otro con la MISMA cantidad de días, que arranca en la
-// fecha que elija el usuario: libre, cualquier día cargado. "Semana anterior" y "4 semanas atrás"
-// son atajos que completan esa fecha; los dos caen en el mismo día de la semana (un "mes anterior"
-// de calendario compararía el martes 6/10 con el domingo 6/9). Como en Tienda Nube, al comparar
+// fecha que elija el usuario: libre, cualquier día cargado. "Semana anterior" y "Misma semana del
+// mes anterior" son atajos que completan esa fecha, siempre en el mismo día de la semana (un "mes
+// anterior" de calendario compararía el martes 6/10 con el domingo 6/9). Como en Tienda Nube, al comparar
 // cambian tres cosas: el % de variación abajo de cada tarjeta, una línea punteada con el período
 // comparado en los gráficos y, en el detalle de cada día, el valor del día equivalente.
-const COMP_ATAJOS={semana:7,'4semanas':28};
+const COMP_ATAJOS={semana:7};
+// "Misma semana del mes anterior" (pedido 2026-10-07): la Semana N de la planilla en el mes anterior,
+// en el mismo día de la semana — Semana 2 de octubre contra Semana 2 de septiembre. No es siempre
+// "4 semanas atrás": las semanas de la planilla van de lunes a domingo y la 1 queda corta, así que la
+// Semana 2 de septiembre (07/09) está 5 semanas después de la de agosto (03/08). Si esa semana no
+// tiene ese día (una Semana 1 que arranca más tarde), cae en el mismo día 4 semanas antes.
+function semanaDeFecha(fecha){const f=(state.tables.LOCAL_DIARIO||[]).find(r=>normalizeDate(r.Fecha)===fecha);return f?{mes:String(f.Mes??'').trim(),semana:String(f.Semana??'').trim()}:null}
+function fechaMismaSemanaMesAnterior(fecha){
+  const w=semanaDeFecha(fecha);if(!w)return null;
+  const i=MESES_NOMBRE.indexOf(w.mes);if(i<0)return null;
+  const mesAnt=MESES_NOMBRE[(i+11)%12],dia=new Date(`${fecha}T00:00:00`).getDay();
+  const fechas=[...new Set((state.tables.LOCAL_DIARIO||[]).filter(r=>String(r.Mes??'').trim()===mesAnt&&String(r.Semana??'').trim()===w.semana).map(r=>normalizeDate(r.Fecha)).filter(Boolean))].sort();
+  return fechas.find(f=>new Date(`${f}T00:00:00`).getDay()===dia)||null;
+}
+// "Semana 2 de Octubre (05/10 → 06/10)" cuando el rango cae entero en una semana de la planilla.
+function etiquetaConSemana(r){const a=semanaDeFecha(r.desde),b=semanaDeFecha(r.hasta);return a&&b&&a.mes===b.mes&&a.semana===b.semana?`Semana ${a.semana} de ${a.mes} (${etiquetaRango(r)})`:etiquetaRango(r)}
 function diasEntre(a,b){return Math.round((new Date(`${b}T00:00:00`)-new Date(`${a}T00:00:00`))/86400000)}
 // Período que se está mirando en Locales: desde el "Desde" elegido (o el primer día con datos si no
 // hay filtro de fecha) hasta el último día cargado — el mismo corte de las tarjetas.
@@ -2777,7 +2792,8 @@ function rangoPrincipalLocales(rows){
 }
 function rangoComparacion(principal,comp=state.comp){
   if(!principal||!comp||comp.modo==='none')return null;
-  const desde=COMP_ATAJOS[comp.modo]?addDaysKey(principal.desde,-COMP_ATAJOS[comp.modo]):comp.desde;
+  const desde=comp.modo==='mesanterior'?(fechaMismaSemanaMesAnterior(principal.desde)||addDaysKey(principal.desde,-28))
+    :COMP_ATAJOS[comp.modo]?addDaysKey(principal.desde,-COMP_ATAJOS[comp.modo]):comp.desde;
   if(!desde)return null;
   return{desde,hasta:addDaysKey(desde,principal.dias-1),dias:principal.dias,corrimiento:diasEntre(desde,principal.desde)};
 }
@@ -2794,7 +2810,11 @@ function datosComparacion(rows){
   if(!rango)return null;
   const local=$('localFilter').value,primero=primerDiaCargado(),ultimo=lastLoadedDate('LOCAL_DIARIO');
   rango.parcial=Boolean((primero&&rango.desde<primero)||(ultimo&&rango.hasta>ultimo));
-  const filas=(state.tables.LOCAL_DIARIO||[]).filter(r=>{const f=normalizeDate(r.Fecha);return f&&f>=rango.desde&&f<=rango.hasta&&(!ultimo||f<=ultimo)&&(local==='all'||String(r.Local??'')===local)});
+  // Mismos locales-día que el período elegido: un día que todavía está a medio cargar (hoy, con 1 de
+  // 14 locales) se compara solo contra esos locales en el día equivalente. Si no, un día entero del
+  // período comparado quedaba contra un pedacito y la variación salía de menos sin motivo.
+  const cargados=new Set(rows.filter(r=>num(r,'Venta real')>0||num(r,'Tráfico real')>0).map(r=>`${normalizeDate(r.Fecha)}|${r.Local}`));
+  const filas=(state.tables.LOCAL_DIARIO||[]).filter(r=>{const f=normalizeDate(r.Fecha);return f&&f>=rango.desde&&f<=rango.hasta&&(!ultimo||f<=ultimo)&&(local==='all'||String(r.Local??'')===local)&&cargados.has(`${addDaysKey(f,rango.corrimiento)}|${r.Local}`)});
   if(!filas.some(r=>num(r,'Venta real')>0))return{rango,vacio:true};
   const a=aggregate(filas);
   const p=cerrarPonderado(filas.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado()));
@@ -2826,7 +2846,7 @@ function filaComparacion(comp,fecha,valor,fmt,tipo,actual){
 }
 // ── Selector "Comparar con" (mismo lenguaje que Período / Período seleccionado) ──
 const compUI={fp:null,borrador:null,sincronizando:false};
-function textoBotonComp(){const c=state.comp;if(c.modo==='semana')return'Semana anterior';if(c.modo==='4semanas')return'4 semanas atrás';if(c.modo==='fecha'&&c.desde)return`Desde ${formatDateShortAR(c.desde)}`;return'Sin comparar'}
+function textoBotonComp(){const c=state.comp;if(c.modo==='semana')return'Semana anterior';if(c.modo==='mesanterior')return'Misma semana del mes anterior';if(c.modo==='fecha'&&c.desde)return`Desde ${formatDateShortAR(c.desde)}`;return'Sin comparar'}
 function refrescarPanelComp(){
   const b=compUI.borrador;
   qa('.comp-atajo').forEach(btn=>btn.classList.toggle('active',btn.dataset.comp===b.modo));
@@ -2834,7 +2854,7 @@ function refrescarPanelComp(){
   const cuantos=n=>`${n} día${n===1?'':'s'}`;
   $('compRango').innerHTML=!principal?'Elegí arriba un período con días cargados.'
     :!rango?`Período elegido: ${etiquetaRango(principal)} (${cuantos(principal.dias)}). Tocá un atajo o una fecha del calendario.`
-    :`Compara <b>${etiquetaRango(principal)}</b> con <b>${etiquetaRango(rango)}</b>: ${cuantos(rango.dias)}, los mismos que el período elegido.`;
+    :`Compara <b>${etiquetaConSemana(principal)}</b> con <b>${etiquetaConSemana(rango)}</b>: ${cuantos(rango.dias)}, los mismos que el período elegido.`;
   $('compApplyBtn').disabled=b.modo!=='none'&&!rango;
   if(compUI.fp){compUI.sincronizando=true;if(rango)compUI.fp.setDate(rango.desde,false);else compUI.fp.clear();compUI.sincronizando=false}
 }
