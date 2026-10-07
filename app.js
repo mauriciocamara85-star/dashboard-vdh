@@ -654,7 +654,8 @@ function computeSellerFocusRows(list,month){
     const obj=cache[row.local];
     return{
       local:row.local,name:row.name,traffic:row.traffic,avgConv,avgTicket,
-      avgConvObj:obj.convObj,avgTicketObj:obj.ticketObj,
+      avgConvObj:obj.convObj,avgTicketObj:obj.ticketObj,trafficTarget:row.trafficTarget||0,
+      trafficGapPct:row.trafficTarget?(row.traffic/row.trafficTarget-1)*100:null,
       convGapPct:obj.convObj?(avgConv-obj.convObj)/obj.convObj*100:null,
       ticketGapPct:obj.ticketObj?(avgTicket-obj.ticketObj)/obj.ticketObj*100:null
     };
@@ -672,7 +673,7 @@ function renderSellerFocus(list,month){
   }
   const focusRows=computeSellerFocusRows(list,month);
   $('sellerFocusRowsCount').textContent=`${focusRows.length} vendedores`;
-  $('sellerFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Vendedor</th><th>Local</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.name)}</td><td class="seller-location">${escapeHtml(r.local)}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="5" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
+  $('sellerFocusTable').innerHTML=focusRows.length?`<thead><tr><th>Vendedor</th><th>Local</th><th class="align-right">Tráfico</th><th class="align-right">Conversión</th><th class="align-right">Ticket promedio</th><th>Foco</th></tr></thead><tbody>${focusRows.map(r=>{const tag=focusTag([{label:'Tráfico',gap:r.trafficGapPct},{label:'Conversión',gap:r.convGapPct},{label:'Ticket',gap:r.ticketGapPct}]);return `<tr><td class="seller-name">${escapeHtml(r.name)}</td><td class="seller-location">${escapeHtml(r.local)}</td><td class="num">${number(r.traffic||0)}${r.trafficTarget?` · obj. ${number(Math.round(r.trafficTarget))}`:''}</td><td class="num">${percent(r.avgConv*100)}${r.avgConvObj?` · obj. ${percent(r.avgConvObj*100)}`:''}</td><td class="num">${money(r.avgTicket)}${r.avgTicketObj?` · obj. ${money(r.avgTicketObj)}`:''}</td><td class="${tag.tone}">${tag.label}</td></tr>`}).join('')}</tbody>`:'<tbody><tr><td colspan="6" class="empty-state">Sin datos para estos filtros</td></tr></tbody>';
 }
 // Pestañas "Resumen"/"Foco" de Locales y Métricas vendedores — mismo patrón que rankScopeTabs de
 // Ranking (tabs con data-tab + toggle de "active" y de paneles hidden), sin acoplarlas entre sí:
@@ -1716,7 +1717,24 @@ function weeklyComplianceByVendedor(month){
   });
   return groups;
 }
+// Qué parte de la semana ya pasó, por vendedor, local y semana: objetivo de VENTA de los días hasta
+// el último cargado ÷ objetivo de venta de la semana entera (VENDEDOR_DIARIO). Se usa para prorratear
+// el objetivo de TRÁFICO de la semana en curso, que en VENDEDOR_SEMANAL viene por la semana completa:
+// sin esto, a mitad de semana se comparaban 2 días de gente contra 7 de objetivo y todos daban
+// "Tráfico ↓" (pedido 2026-10-07: Eve Poetto, 8 personas contra 49 el martes). El reparto por día del
+// objetivo de venta es el que ya carga la planilla, así que refleja qué días se espera más gente.
+// Semana cerrada = 1. Sin datos diarios = 1 (nunca se inventa un recorte).
+function fraccionSemanaTranscurrida(){
+  const corte=objectiveCutoff(),acc={};
+  (state.tables.VENDEDOR_DIARIO||[]).forEach(r=>{
+    const k=`${r.Vendedor}|${r.Local}|${weekKeyOf(r)}`,o=num(r,'Objetivo del día');
+    const e=acc[k]||(acc[k]={total:0,hasta:0});
+    e.total+=o;if(String(r.Fecha??'').slice(0,10)<=corte)e.hasta+=o;
+  });
+  return(vendedor,local,weekKey)=>{const e=acc[`${vendedor}|${local}|${weekKey}`];return e&&e.total>0?e.hasta/e.total:1};
+}
 function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};
+  const fraccionSemana=fraccionSemanaTranscurrida();
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba partido en dos
   // filas de esta tabla, cada una con la mitad de su venta y objetivo, como si fueran dos personas
   // distintas — el nombre+apellido ya alcanza como identidad única (bug real reportado el
@@ -1724,10 +1742,11 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   // romper localObjetivoFor() más abajo, que necesita el nombre exacto de un local de LOCAL_DIARIO.
   rows.forEach(row=>{
     const key=row.Vendedor;
-    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,pond:nuevoPonderado(),count:0};
+    if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),sale:0,target:0,traffic:0,trafficTarget:0,pond:nuevoPonderado(),count:0};
     const group=groups[key];
     group.locales.add(row.Local);
     group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');
+    group.trafficTarget+=num(row,'Tráfico obj')*fraccionSemana(row.Vendedor,row.Local,weekKeyOf(row));
     sumarPonderado(group.pond,num(row,'Venta real'),num(row,'TP real'),num(row,'PxT real'),num(row,'Tráfico real'));
     // Conversión/TP/PxT se promedian SOLO sobre las semanas que tienen el dato cargado, no sobre
     // todas las filas del vendedor. VENDEDOR_SEMANAL trae una fila por CADA semana del semestre y
