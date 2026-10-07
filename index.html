@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <div class="update-banner" id="updateBanner" hidden>
@@ -53,7 +53,7 @@
         <p>Cargando datos del negocio…</p>
       </div>
       <header class="topbar">
-        <div class="eyebrow">MONITOR DE PERFORMANCE <span class="slash">/</span> <span id="lastRefresh">sin datos</span></div>
+        <div class="topbar-left"><button class="icon-button menu-toggle" id="menuToggle" type="button" title="Ocultar menú" aria-label="Ocultar menú" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg></button><div class="eyebrow">MONITOR DE PERFORMANCE <span class="slash">/</span> <span id="lastRefresh">sin datos</span></div></div>
         <div class="top-actions"><span class="data-status" id="dataStatus" aria-live="polite">Esperando conexión</span><span class="refresh-confirm" id="refreshConfirm" aria-live="polite"></span><button class="icon-button" id="refreshButton" title="Actualizar datos" aria-label="Actualizar datos">↻</button></div>
       </header>
 
@@ -158,16 +158,15 @@
           <article class="panel"><div class="panel-head"><div><span class="section-kicker">RÉCORDS PERSONALES</span><h2>Mejor marca propia</h2></div></div><div id="badgesRecords" class="badge-panel empty-state">Sin datos</div></article>
         </div>
         <div id="rankEvolutionPanel" hidden>
-          <div class="rank-sort-toggle" id="evolutionScopeToggle" role="group" aria-label="Evolución de"><button class="rank-tab-sm active" data-evoscope="seller">Vendedor</button><button class="rank-tab-sm" data-evoscope="local">Local</button></div>
-          <div id="evolutionEmpty" class="empty-state">Elegí un vendedor en el filtro "Vendedor" de arriba para ver su evolución semanal.</div>
+          <div id="evolutionEmpty" class="empty-state">Sin datos todavía.</div>
           <div id="evolutionContent" hidden>
             <div class="panel-head"><div><span class="section-kicker" id="evolutionKicker">EVOLUCIÓN SEMANAL</span><h2 id="evolutionHeading">Vendedor</h2></div></div>
             <div class="metric-grid" id="evolutionMetrics"></div>
+            <article class="panel evo-venta-panel"><div class="panel-head"><div><span class="section-kicker">VENTA VS. OBJETIVO</span><h2 id="evolutionChartTitle">Por semana</h2></div></div><div id="evolutionChart"></div></article>
             <div class="split-grid">
-              <article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">% CUMPLIMIENTO</span><h2 id="evolutionChartTitle">Por semana</h2></div></div><div id="evolutionChart" class="bar-chart"></div></article>
+              <article class="panel panel-large"><div class="panel-head"><div><span class="section-kicker">DETALLE</span><h2 id="evolutionTableTitle">Semana a semana</h2></div></div><div class="table-wrap"><table id="evolutionTable" class="table-wide"></table></div></article>
               <article class="panel"><div class="panel-head"><div><span class="section-kicker" id="evolutionSideKicker">HITOS</span><h2 id="evolutionSideTitle">De este vendedor</h2></div></div><div id="evolutionBadges" class="badge-panel empty-state">Sin datos</div></article>
             </div>
-            <article class="panel"><div class="panel-head"><div><span class="section-kicker">DETALLE</span><h2 id="evolutionTableTitle">Semana a semana</h2></div></div><div class="table-wrap"><table id="evolutionTable" class="table-wide"></table></div></article>
           </div>
         </div>
         <div id="rankGpPanel" hidden>

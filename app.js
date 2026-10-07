@@ -1,5 +1,5 @@
 const DATA_ENDPOINT='https://script.google.com/macros/s/AKfycbyuS6K8oq2KWJ6BMSayHXHHSf0v2jr70OoSD4UfwX77cD3OobN1OrzFsTTXC6JI9Yo/exec';
-const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',evoScope:'seller',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
+const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
 // de refresh) para reemplazar los emoji de navegación/medallero por vectores consistentes en el
@@ -1291,12 +1291,15 @@ function vendorHistory(){
     return{local:[...g.locales].sort().join(' + '),name:g.name,weeks:g.weeks};
   });
 }
-function localHistory(){
+// unificar: todos los locales filtrados en un solo historial ("Todos los locales"), para Evolución
+// sin local elegido.
+function localHistory(unificar=false){
   const local=$('localFilter').value,seller=$('sellerFilter').value;
   const rows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>(local==='all'||String(row.Local??'')===local)&&(seller==='all'||String(row.Vendedor??'')===seller));
+  const grupoDe=row=>unificar?'Todos los locales':(row.Local||'Sin local');
   const groups={};
   rows.forEach(row=>{
-    const loc=row.Local||'Sin local',weekKey=weekKeyOf(row);
+    const loc=grupoDe(row),weekKey=weekKeyOf(row);
     if(!groups[loc])groups[loc]={};
     if(!groups[loc][weekKey])groups[loc][weekKey]={actual:0,target:0,tpSum:0,tpCount:0,convSum:0,convCount:0,pxtSum:0,pxtCount:0};
     const w=groups[loc][weekKey];
@@ -1307,11 +1310,23 @@ function localHistory(){
     const pxt=num(row,'PxT real');if(pxt){w.pxtSum+=pxt;w.pxtCount++}
   });
   // Semana en curso contra el objetivo a la fecha — mismo motivo que en vendorHistory.
-  const avance=avanceDeSemanas(r=>seller==='all'?String(r.Local??''):`${r.Local}|${r.Vendedor}`,corteEvolucion());
+  const claveAvance=r=>unificar?'red':seller==='all'?String(r.Local??''):`${r.Local}|${r.Vendedor}`;
+  const avance=avanceDeSemanas(claveAvance,corteEvolucion());
+  // Ticket, conversión y PxT de cada semana: de la planilla del local (LOCAL_DIARIO), ponderados como
+  // en Locales y en la propia planilla. Promediar lo que cargó cada vendedor no da lo mismo: Rivadavia
+  // Semana 1 de Octubre daba $68.086 de ticket contra $70.267 de la planilla (2026-10-07). Con un
+  // vendedor filtrado no aplica: queda lo suyo.
+  const pondSemana={};
+  if(seller==='all')(state.tables.LOCAL_DIARIO||[]).filter(r=>local==='all'||String(r.Local??'')===local).forEach(r=>{
+    const k=`${grupoDe(r)}|${weekKeyOf(r)}`;
+    sumarPonderado(pondSemana[k]||(pondSemana[k]=nuevoPonderado()),num(r,'Venta real'),num(r,'Ticket prom.'),num(r,'PxT real'),num(r,'Tráfico real'),convRate(r,'Conversión'));
+  });
   return Object.keys(groups).map(loc=>{
     const weeks=Object.keys(groups[loc]).sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b)).map(wk=>{
-      const w=groups[loc][wk],f=avance(seller==='all'?loc:`${loc}|${seller}`,wk),obj=w.target*f;
-      return{weekKey:wk,f,enCurso:f<1,real:w.actual,obj,ratio:obj?w.actual/obj*100:null,tp:w.tpCount?w.tpSum/w.tpCount:0,conv:w.convCount?w.convSum/w.convCount:0,pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
+      const w=groups[loc][wk],f=avance(unificar?'red':seller==='all'?loc:`${loc}|${seller}`,wk),obj=w.target*f;
+      const p=pondSemana[`${loc}|${wk}`]?cerrarPonderado(pondSemana[`${loc}|${wk}`]):null;
+      return{weekKey:wk,f,enCurso:f<1,real:w.actual,obj,ratio:obj?w.actual/obj*100:null,
+        tp:p?p.ticket:w.tpCount?w.tpSum/w.tpCount:0,conv:p?p.conversion:w.convCount?w.convSum/w.convCount:0,pxt:p?p.pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
     }).filter(w=>w.f>0);
     return{local:loc,weeks};
   });
@@ -1446,38 +1461,78 @@ function renderRankBadges(){
 
   $('badgesRecords').innerHTML=records.length?records.map(r=>{const meta=metricMeta[r.metric];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.local)} · nuevo récord de ${meta.label}</span></div><span class="badge-value">${meta.fmt(r.value)}</span></div>`}).join(''):'<div class="empty-state">Todavía no hay récords personales — hace falta más de una semana cargada</div>';
 }
-// Monto corto para las etiquetas del gráfico: $1,29M · $850K (coma decimal, como el resto).
-const montoEtiqueta=v=>{const a=Math.abs(v);return a>=1e6?`$${new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(a/1e6)}M`:a>=1e3?`$${Math.round(a/1e3)}K`:money(a)};
-// Objetivo, venta y desvío arriba de cada punto (pedido 2026-10-07). Van en HTML encima del SVG —
-// el SVG se estira a lo ancho (preserveAspectRatio="none") y un texto adentro saldría deformado.
-// Con más de 8 puntos (el semestre entero) se pisarían: ahí, y en el celular, aparecen al pasar
-// o tocar el punto.
-function evolutionEtiquetas(points,x,y,w,h){
-  const conDato=points.filter(p=>p.ratio!==null&&(p.obj||p.real));
-  if(!conDato.length)return '';
-  const ultimo=points.length-1;
-  return conDato.map(p=>{
-    const desvio=(p.real||0)-(p.obj||0),pos=p.i===0&&ultimo>0?' primero':p.i===ultimo&&ultimo>0?' ultimo':'';
-    return `<div class="evo-punto${pos}" style="left:${(x(p.i)/w*100).toFixed(2)}%;top:${(y(p.ratio)/h*100).toFixed(2)}%"><span class="evo-hit" tabindex="0" aria-label="${escapeHtml(p.etiqueta)}"></span><div class="evo-label"><strong>${montoEtiqueta(p.real||0)}</strong><span>obj. ${montoEtiqueta(p.obj||0)}${p.enCurso?' a la fecha':''}</span><em class="${desvio>=0?'positive':'negative'}">${desvio>=0?'+':'−'}${montoEtiqueta(desvio)}</em></div></div>`;
-  }).join('');
+// ── Evolución: venta contra objetivo, con el formato de los módulos de Locales ──
+// Pedido 2026-10-07: el gráfico con la misma pinta que "Ticket promedio diario" de Locales, pero de
+// VENTA — franja de tarjetas, escala en $, la venta de cada semana (o día) como línea con área, el
+// objetivo de cada una punteado (escalón: cada semana tiene el suyo), el promedio de referencia,
+// mayor / menor / último rotulados, y venta, objetivo, desvío y % al pasar el cursor. Reusa las
+// piezas de esos módulos (escalaRedonda, grillaSvg, calloutsHtml, engancharTooltipModulo).
+// puntos: [{v, obj, etiqueta (tooltip), eje (rótulo del eje X), enCurso}]. La semana en curso va
+// como anillo suelto, fuera de la línea: su venta es de pocos días.
+// stats: las 4 tarjetas de arriba, ya armadas por quien llama (semanas y días cuentan distinto).
+function renderEvolucionVenta(container,puntos,stats,notaEnCurso){
+  const n=puntos.length;
+  const datos=puntos.map((p,i)=>({...p,v:p.v||0,obj:p.obj||0,i,estado:p.enCurso?'parcial':'ok'}));
+  const{ticks,tope}=escalaRedonda(Math.max(1,...datos.map(x=>Math.max(x.v,x.obj))));
+  const Y=v=>1000-(v/tope)*1000,banda=1000/n,centro=i=>(i+.5)*banda;
+  const posX=i=>(centro(i)/10).toFixed(2),posY=v=>(Y(v)/10).toFixed(2);
+
+  const tramos=[];let tramo=[];
+  datos.forEach(x=>{if(x.estado==='ok')tramo.push(x.i);else if(tramo.length){tramos.push(tramo);tramo=[]}});
+  if(tramo.length)tramos.push(tramo);
+  const trazo=t=>t.map((i,k)=>`${k?'L':'M'}${centro(i).toFixed(1)} ${Y(datos[i].v).toFixed(1)}`).join(' ');
+  const largos=tramos.filter(t=>t.length>1);
+  const areas=largos.map(t=>`<path class="cm-area" fill="url(#cmGradEvolucion)" d="${trazo(t)} L${centro(t[t.length-1]).toFixed(1)} 1000 L${centro(t[0]).toFixed(1)} 1000 Z"></path>`).join('');
+  const lineas=largos.map(t=>`<path class="cm-linea" d="${trazo(t)}"></path>`).join('');
+  const conObj=datos.filter(x=>x.obj>0);
+  const objetivo=conObj.length?`<path class="evo-obj-escalon" d="${conObj.map((x,k)=>`${k?'L':'M'}${(x.i*banda).toFixed(1)} ${Y(x.obj).toFixed(1)} L${((x.i+1)*banda).toFixed(1)} ${Y(x.obj).toFixed(1)}`).join(' ')}"></path>`:'';
+
+  const cerrados=datos.filter(x=>x.estado==='ok');
+  const promedio=cerrados.length?cerrados.reduce((a,x)=>a+x.v,0)/cerrados.length:0;
+  const refProm=promedio>0?lineaHorizontalSvg('cm-prom',Y(promedio)):'';
+  const refPromTxt=promedio>0?`<div class="cm-ref-label cm-ref-der" style="top:${posY(promedio)}%;color:var(--muted)">promedio ${money(promedio)}</div>`:'';
+
+  // Mayor y menor entre los cerrados, más el último; si coinciden se dicen juntos.
+  const rotulos={};
+  const rotular=(x,motivo)=>{if(x)(rotulos[x.i]=rotulos[x.i]||{x,motivos:[]}).motivos.push(motivo)};
+  if(cerrados.length){
+    rotular(cerrados.reduce((a,b)=>b.v>a.v?b:a),'pico');
+    if(cerrados.length>2)rotular(cerrados.reduce((a,b)=>b.v<a.v?b:a),'mín.');
+  }
+  rotular(datos[n-1],datos[n-1].enCurso?'en curso':'último');
+  const puntosHtml=datos.filter(x=>n<=12||rotulos[x.i]||x.estado==='parcial').map(x=>`<div class="cm-punto${x.estado==='parcial'?' cm-punto-parcial':''}" style="left:${posX(x.i)}%;top:${posY(x.v)}%"></div>`).join('');
+  const cada=Math.max(1,Math.ceil(n/10));
+  const ejeY=ticks.map(t=>`<span style="top:${posY(t)}%">${moneyShort(t)}</span>`).join('');
+  const ejeX=datos.map((x,i)=>(i%cada===0||i===n-1)?`<span style="left:${posX(i)}%">${escapeHtml(x.eje)}</span>`:'').join('');
+  const defs='<defs><linearGradient id="cmGradEvolucion" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".28"></stop><stop offset="100%" stop-color="currentColor" stop-opacity="0"></stop></linearGradient></defs>';
+  const grafico=`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot" style="color:var(--coral)"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${defs}${grillaSvg(ticks,Y)}${refProm}${objetivo}${areas}${lineas}</svg>${refPromTxt}<div class="cm-guia" hidden></div>${puntosHtml}<div class="cm-punto cm-punto-hover" hidden></div>${calloutsHtml(rotulos,v=>money(v),posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+  const pie=`<span class="cm-key"><i class="cm-key-linea" style="background:var(--coral)"></i>Venta</span><span class="cm-key"><i class="cm-key-objlinea"></i>Objetivo</span><span class="cm-key"><i class="cm-key-prom"></i>Promedio</span>${notaEnCurso?`<span class="cm-foot-raros">${notaEnCurso}</span>`:''}`;
+  container.className='';
+  container.innerHTML=moduloAnalisisHtml(stats,grafico,pie);
+  const signo=v=>`${v>=0?'+':'−'}${money(Math.abs(v))}`;
+  engancharTooltipModulo(container,datos,x=>`<div class="chart-tooltip-date">${escapeHtml(x.etiqueta)}${x.enCurso?' · en curso':''}</div>`+
+    tipFila('var(--coral)','Venta',money(x.v))+
+    (x.obj?tipFila('',x.enCurso?'Objetivo a la fecha':'Objetivo',money(x.obj))+
+      tipFila('','Desvío',`<span class="${x.v>=x.obj?'good':'bad'}">${signo(x.v-x.obj)}</span>`)+
+      tipFila('','Cumplimiento',`<span class="${statusTone(x.v/x.obj)}">${percent(x.v/x.obj*100)}</span>`)
+      :tipFila('','Sin objetivo cargado')),
+    x=>`${posY(x.v)}%`);
 }
-// points: [{ratio, real, obj, enCurso, etiqueta (tooltip), corto (eje)}] — semanas o días;
-// unidad: "última semana"/"último día".
-function evolutionChartSvg(puntos,unidad){
-  const points=puntos.map((p,i)=>({...p,i}));
-  const withRatio=points.filter(p=>p.ratio!==null);
-  if(!withRatio.length)return '<div class="empty-state">Sin objetivo cargado para graficar</div>';
-  const w=760,h=190;
-  const maxVal=Math.max(...withRatio.map(p=>p.ratio),110);
-  const x=i=>points.length>1?(i/(points.length-1))*w:w/2;
-  const y=v=>h-(v/maxVal)*(h-6)-3;
-  const path=withRatio.length>1?withRatio.map((p,idx)=>`${idx===0?'M':'L'}${x(p.i).toFixed(1)},${y(p.ratio).toFixed(1)}`).join(' '):'';
-  const detalle=p=>p.obj||p.real?` — venta ${money(p.real||0)} · objetivo ${money(p.obj||0)} · desvío ${(p.real||0)>=(p.obj||0)?'+':'−'}${money(Math.abs((p.real||0)-(p.obj||0)))}`:'';
-  const dots=withRatio.map(p=>`<circle class="line-dot" cx="${x(p.i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="4"><title>${percent(p.ratio)} · ${escapeHtml(p.etiqueta)}${detalle(p)}</title></circle>`).join('');
-  const targetY=y(100).toFixed(1);
-  const first=points[0],last=points[points.length-1];
-  const lastRatioLabel=last.ratio!==null?`${percent(last.ratio)} ${unidad}`:`sin objetivo ${unidad==='último día'?'el último día':'la última semana'}`;
-  return `<div class="chart-legend"><span><i class="legend-swatch" style="background:#52657d"></i>Objetivo (100%)</span><span><i class="legend-swatch" style="background:#F97316"></i>% cumplimiento</span></div><div class="evo-plot${points.length>8?' solo-hover':''}"><svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" stroke="#52657d" stroke-dasharray="6 5" stroke-width="2"></line>${path?`<path class="line-actual" d="${path}"></path>`:''}${dots}</svg>${evolutionEtiquetas(points,x,y,w,h)}</div><div class="line-axis"><span>${escapeHtml(first.corto)}</span><span>${lastRatioLabel}</span><span>${escapeHtml(last.corto)}</span></div>`;
+// Tarjetas del módulo: venta total contra objetivo, desvío, y la semana/día de mayor y menor venta
+// (entre los cerrados; la semana en curso no compite).
+function statsEvolucionVenta(puntos,unidad){
+  const venta=puntos.reduce((a,p)=>a+(p.v||0),0),obj=puntos.reduce((a,p)=>a+(p.obj||0),0),desvio=venta-obj;
+  const cerrados=puntos.filter(p=>!p.enCurso&&p.obj>0);
+  const mayor=cerrados.length?cerrados.reduce((a,b)=>b.v>a.v?b:a):null,menor=cerrados.length>1?cerrados.reduce((a,b)=>b.v<a.v?b:a):null;
+  const enObjetivo=puntos.filter(p=>p.obj>0&&p.v>=p.obj).length;
+  const cuantos=unidad==='día'?`${puntos.length} ${puntos.length===1?'día':'días'} · ${enObjetivo} en objetivo`:`${puntos.length} ${puntos.length===1?'semana':'semanas'}`;
+  const sub=p=>`${escapeHtml(p.etiqueta)} · <b class="${statusTone(p.v/p.obj)}">${percent(p.v/p.obj*100)}</b>`;
+  return[
+    {label:unidad==='día'?'Venta de la semana':'Venta del período',value:money(venta),sub:`${cuantos}${puntos.some(p=>p.enCurso)?' · con la semana en curso':''}`},
+    {label:'Vs. objetivo',value:obj?percent(venta/obj*100):'—',tone:obj?statusTone(venta/obj):'',sub:obj?`objetivo ${money(obj)} · <b class="${desvio>=0?'good':'bad'}">${desvio>=0?'+':'−'}${money(Math.abs(desvio))}</b>`:'sin objetivo cargado'},
+    {label:unidad==='día'?'Mejor día':'Mayor venta',value:mayor?money(mayor.v):'—',sub:mayor?sub(mayor):''},
+    {label:unidad==='día'?'Peor día':'Menor venta',value:menor?money(menor.v):'—',sub:menor?sub(menor):''}
+  ];
 }
 function showEvolutionEmpty(badgeText,message){
   $('rankingPeriodBadge').textContent=badgeText;
@@ -1485,14 +1540,13 @@ function showEvolutionEmpty(badgeText,message){
   $('evolutionEmpty').innerHTML=message;
   $('evolutionContent').hidden=true;
 }
+// Sin píldoras Vendedor/Local (pedido 2026-10-07: ya lo dice el filtro de arriba). Con un vendedor
+// elegido, su evolución; si no, la del local elegido; con "Todos los locales", la de la red entera.
 function renderRankEvolution(){
-  qa('#evolutionScopeToggle .rank-tab-sm').forEach(btn=>btn.classList.toggle('active',btn.dataset.evoscope===state.evoScope));
-  if(state.evoScope==='local')renderEvolutionLocal();
-  else renderEvolutionSeller();
+  if($('sellerFilter').value!=='all')renderEvolutionSeller();
+  else renderEvolutionLocal();
 }
 function renderEvolutionSeller(){
-  const seller=$('sellerFilter').value;
-  if(seller==='all'){showEvolutionEmpty('Elegí un vendedor','Elegí un vendedor en el filtro "Vendedor" de arriba para ver su evolución semanal.');return}
   // vendorHistory() ya filtra por este mismo nombre exacto ANTES de agrupar (y agrupa por nombre
   // solo, ver fusionarVendedoresCompartidos) — no puede devolver más de un historial acá, así que ya
   // no hace falta el aviso de "vendedores ambiguos, elegí un Local" que existía antes: esa
@@ -1504,11 +1558,10 @@ function renderEvolutionSeller(){
   renderEvolutionPeriodo(person.weeks,`${person.name} · ${person.local}`,'este vendedor');
 }
 function renderEvolutionLocal(){
-  const local=$('localFilter').value;
-  if(local==='all'){showEvolutionEmpty('Elegí un local','Elegí un local en el filtro "Local" de arriba para ver su evolución semanal.');return}
-  const store=localHistory()[0];
-  if(!store||!store.weeks.length){showEvolutionEmpty('Sin semanas','Sin datos de VENDEDOR_SEMANAL para este local todavía.');return}
-  renderEvolutionPeriodo(store.weeks,store.local,'este local');
+  const red=$('localFilter').value==='all';
+  const store=localHistory(red)[0];
+  if(!store||!store.weeks.length){showEvolutionEmpty('Sin semanas',`Sin datos de VENDEDOR_SEMANAL para ${red?'la red':'este local'} todavía.`);return}
+  renderEvolutionPeriodo(store.weeks,store.local,red?'toda la red':'este local');
 }
 function renderEvolutionPeriodo(weeks,heading,quien){
   const mes=evoMesElegido(),semana=evoSemanaElegida();
@@ -1559,7 +1612,11 @@ function renderEvolutionWeeks(weeks,todas,heading,quien,mes){
     (best?metricsCard('Mejor semana',percent(best.ratio),best.weekKey.replace('|',' · Semana '),best.ratio>=100?'good':''):metricsCard('Mejor semana','—',hayEnCurso?'la semana todavía está en curso':''))+
     metricsCard('Mejora promedio',avgMejora!==null?`${avgMejora>=0?'+':''}${avgMejora.toFixed(1)} pts`:'—',avgMejora!==null?(hayEnCurso?'entre semanas cerradas':'entre semanas consecutivas'):(hayEnCurso&&!visiblesCerradas.length?'la semana todavía está en curso':'esperando 2ª semana'),avgMejora!==null?(avgMejora>=0?'good':'bad'):'');
 
-  $('evolutionChart').innerHTML=evolutionChartSvg(weeks.map(w=>{const [m,n]=w.weekKey.split('|');return{ratio:w.ratio,real:w.real,obj:w.obj,enCurso:w.enCurso,etiqueta:`Semana ${n} de ${m}${w.enCurso?' (en curso)':''}`,corto:`S${n} ${m}`}}),'última semana');
+  $('evolutionMetrics').hidden=false;
+  const puntosVenta=weeks.map(w=>{const [m,n]=w.weekKey.split('|');return{v:w.real,obj:w.obj,enCurso:w.enCurso,etiqueta:`Semana ${n} de ${m}`,eje:`S${n} ${m.slice(0,3)}`}});
+  const enCursoV=puntosVenta.find(p=>p.enCurso);
+  renderEvolucionVenta($('evolutionChart'),puntosVenta,statsEvolucionVenta(puntosVenta,'semana'),
+    enCursoV?`${enCursoV.etiqueta} en curso: venta hasta el ${formatDateShortAR(corteEvolucion())} contra el objetivo a la fecha`:'');
 
   const rows=weeks.map(w=>{
     const mejora=mejoraDe(w);
@@ -1604,7 +1661,11 @@ function renderEvolutionDias(dias,weeks,semana,heading){
     (best?metricsCard('Mejor día',percent(best.ratio),`${escapeHtml(best.dia)} ${formatDateShortAR(best.fecha)}`,statusTone(best.ratio/100)):metricsCard('Mejor día','—',''))+
     metricsCard('Días en objetivo',`${enObjetivo} de ${conObjetivo.length}`,'días con 100% o más',conObjetivo.length&&enObjetivo===conObjetivo.length?'good':'');
 
-  $('evolutionChart').innerHTML=evolutionChartSvg(dias.map(d=>({ratio:d.ratio,real:d.venta,obj:d.objetivo,etiqueta:`${d.dia} ${formatDateShortAR(d.fecha)}`,corto:`${diaCortoDe(d.fecha)} ${formatDateShortAR(d.fecha)}`})),'último día');
+  const puntosDia=dias.map(d=>({v:d.venta,obj:d.objetivo,etiqueta:`${d.dia} ${formatDateShortAR(d.fecha)}`,eje:`${diaCortoDe(d.fecha)} ${formatDateShortAR(d.fecha)}`}));
+  // En la vista por días las tarjetas del gráfico ya dicen venta, objetivo, mejor y peor día y
+  // cuántos en objetivo: las de arriba quedarían repetidas.
+  $('evolutionMetrics').hidden=true;
+  renderEvolucionVenta($('evolutionChart'),puntosDia,statsEvolucionVenta(puntosDia,'día'),'');
 
   const rows=dias.map(d=>{
     const desvio=d.venta-d.objetivo;
@@ -4055,7 +4116,21 @@ function renderRentabilidad(){
 
 function scheduleRefresh(){clearInterval(state.timer);state.timer=null}
 $('overviewGreeting').textContent=pickGreeting();
-applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('#evolutionScopeToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.evoScope=button.dataset.evoscope;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
+// Botón ☰ de arriba a la izquierda (pedido 2026-10-07): esconde el menú para ver el dashboard a
+// pantalla completa, y lo vuelve a mostrar. Queda recordado en este navegador. En el celular no
+// aplica: ahí el menú ya es la barra de abajo (ver styles.css).
+function aplicarMenu(oculto){
+  document.documentElement.classList.toggle('menu-oculto',oculto);
+  const b=$('menuToggle');
+  if(b){b.setAttribute('aria-expanded',String(!oculto));b.title=oculto?'Mostrar menú':'Ocultar menú';b.setAttribute('aria-label',b.title)}
+}
+try{aplicarMenu(localStorage.getItem('vdh-menu-oculto')==='1')}catch(e){}
+if($('menuToggle'))$('menuToggle').addEventListener('click',()=>{
+  const oculto=!document.documentElement.classList.contains('menu-oculto');
+  aplicarMenu(oculto);
+  try{localStorage.setItem('vdh-menu-oculto',oculto?'1':'0')}catch(e){}
+});
+applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
 // ── BOTTOM NAV + DRAWER (mobile) ──────────────────────────────
 qa('.bottom-nav-item[data-view]').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 function openMainDrawer(){$('mainDrawerBackdrop').hidden=false;$('mainDrawerPanel').hidden=false;$('mainDrawerToggle').setAttribute('aria-expanded','true')}
