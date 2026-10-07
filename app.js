@@ -3957,7 +3957,9 @@ function openPeriodDropdown(){$('periodDropdown').hidden=false}
 function closePeriodDropdown(){$('periodDropdown').hidden=true}
 function openCalendarDropdown(){$('periodCalendarDropdown').hidden=false;if(!periodPicker.fp)initFlatpickr()}
 function closeCalendarDropdown(){$('periodCalendarDropdown').hidden=true}
-function markActivePreset(preset){qa('.period-preset').forEach(btn=>btn.classList.toggle('active',btn.dataset.preset===preset))}
+// Solo los botones de Período (data-preset): los atajos de "Comparar con" usan la misma clase para
+// verse igual, y sin este filtro un clic ahí reseteaba el período a "semestre completo" (2026-10-07).
+function markActivePreset(preset){qa('.period-preset[data-preset]').forEach(btn=>btn.classList.toggle('active',btn.dataset.preset===preset))}
 // Presets "actuales" son a la fecha (desde el inicio de la semana/mes/trimestre HASTA hoy, no el
 // período completo) — mismo criterio que "Semana actual"/"Mes actual"/"Trimestre actual" de
 // Tiendanube, que muestran lo acumulado corrido, no un período futuro vacío.
@@ -4034,7 +4036,7 @@ function initPeriodPicker(){
     if(!$('periodPickerField').contains(e.target))closePeriodDropdown();
     if(!$('periodCustomField').contains(e.target))closeCalendarDropdown();
   });
-  qa('.period-preset').forEach(btn=>btn.addEventListener('click',()=>applyPeriodPreset(btn.dataset.preset)));
+  qa('.period-preset[data-preset]').forEach(btn=>btn.addEventListener('click',()=>applyPeriodPreset(btn.dataset.preset)));
   $('periodCancelBtn').addEventListener('click',()=>closeCalendarDropdown());
   $('periodApplyBtn').addEventListener('click',()=>{
     const sel=periodPicker.fp?periodPicker.fp.selectedDates:[];
