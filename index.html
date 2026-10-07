@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
   <div class="update-banner" id="updateBanner" hidden>
@@ -93,6 +93,27 @@
             </div>
           </div>
         </div>
+        <div class="period-field" id="compField" hidden>
+          <span class="period-field-label">Comparar con</span>
+          <button type="button" id="compBtn" class="period-trigger" aria-haspopup="dialog" aria-expanded="false">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span id="compBtnText">Sin comparar</span>
+            <svg class="icon-svg period-trigger-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="period-dropdown period-calendar-dropdown comp-dropdown" id="compDropdown" role="dialog" aria-label="Comparar con otra fecha" hidden>
+            <div class="period-group-label">Atajos</div>
+            <button type="button" class="period-preset comp-atajo" data-comp="none">Sin comparar</button>
+            <button type="button" class="period-preset comp-atajo" data-comp="semana">Semana anterior</button>
+            <button type="button" class="period-preset comp-atajo" data-comp="4semanas">4 semanas atrás</button>
+            <div class="period-group-label">O elegí la fecha desde la que compara</div>
+            <div id="compCalendar" class="period-calendar"></div>
+            <p class="comp-rango" id="compRango"></p>
+            <div class="period-custom-actions">
+              <button type="button" class="text-button" id="compCancelBtn">Cancelar</button>
+              <button type="button" class="period-apply-btn" id="compApplyBtn">Aplicar</button>
+            </div>
+          </div>
+        </div>
         <input id="fromDate" type="date" hidden aria-hidden="true" tabindex="-1">
         <input id="toDate" type="date" hidden aria-hidden="true" tabindex="-1">
         <label id="metricsMonthLabel" hidden>Mes<select id="metricsMonthFilter"><option value="all">Todos los meses</option></select></label>
@@ -121,12 +142,12 @@
       <section id="storesView" class="view"><div class="view-heading"><div><span class="section-kicker">02 / RED FÍSICA</span><h1>Locales.</h1><p>Venta, tráfico y conversión por día, con el desvío calculado sobre el objetivo que correspondía.</p></div></div><div class="rank-tabs" id="storeViewTabs" role="tablist" aria-label="Vista"><button class="rank-tab active" data-tab="resumen">Resumen</button><button class="rank-tab" data-tab="foco">Foco</button><button class="rank-tab" data-tab="sucursales">Ventas por sucursal</button></div>
         <div id="storeResumenPanel">
           <div class="store-kpi-grid" id="storeKpiGrid">
-            <button class="store-kpi-card active" data-store-metric="venta" type="button"><span class="store-kpi-index">01</span><span class="store-kpi-label">Venta vs. Objetivo</span><span class="store-kpi-value" id="storeKpiValue-venta">—</span><span class="store-kpi-sub" id="storeKpiSub-venta"></span><span class="store-kpi-spark" id="storeKpiSpark-venta"></span></button>
-            <button class="store-kpi-card" data-store-metric="proyeccion" type="button"><span class="store-kpi-index">02</span><span class="store-kpi-label">Proyección de Cierre</span><span class="store-kpi-value" id="storeKpiValue-proyeccion">—</span><span class="store-kpi-sub" id="storeKpiSub-proyeccion"></span><span class="store-kpi-spark" id="storeKpiSpark-proyeccion"></span></button>
-            <button class="store-kpi-card" data-store-metric="conversion" type="button"><span class="store-kpi-index">03</span><span class="store-kpi-label">Conversión %</span><span class="store-kpi-value" id="storeKpiValue-conversion">—</span><span class="store-kpi-sub" id="storeKpiSub-conversion"></span><span class="store-kpi-spark" id="storeKpiSpark-conversion"></span></button>
-            <button class="store-kpi-card" data-store-metric="ticket" type="button"><span class="store-kpi-index">04</span><span class="store-kpi-label">Ticket Promedio $</span><span class="store-kpi-value" id="storeKpiValue-ticket">—</span><span class="store-kpi-sub" id="storeKpiSub-ticket"></span><span class="store-kpi-spark" id="storeKpiSpark-ticket"></span></button>
-            <button class="store-kpi-card" data-store-metric="trafico" type="button"><span class="store-kpi-index">05</span><span class="store-kpi-label">Tráfico</span><span class="store-kpi-value" id="storeKpiValue-trafico">—</span><span class="store-kpi-sub" id="storeKpiSub-trafico"></span><span class="store-kpi-spark" id="storeKpiSpark-trafico"></span></button>
-            <button class="store-kpi-card" data-store-metric="pagos" type="button"><span class="store-kpi-index">06</span><span class="store-kpi-label">Medios de Pago</span><span class="store-kpi-value" id="storeKpiValue-pagos">—</span><span class="store-kpi-sub" id="storeKpiSub-pagos"></span><span class="store-kpi-spark" id="storeKpiSpark-pagos"></span></button>
+            <button class="store-kpi-card active" data-store-metric="venta" type="button"><span class="store-kpi-index">01</span><span class="store-kpi-label">Venta vs. Objetivo</span><span class="store-kpi-value" id="storeKpiValue-venta">—</span><span class="store-kpi-sub" id="storeKpiSub-venta"></span><span class="store-kpi-comp" id="storeKpiComp-venta" hidden></span><span class="store-kpi-spark" id="storeKpiSpark-venta"></span></button>
+            <button class="store-kpi-card" data-store-metric="proyeccion" type="button"><span class="store-kpi-index">02</span><span class="store-kpi-label">Proyección de Cierre</span><span class="store-kpi-value" id="storeKpiValue-proyeccion">—</span><span class="store-kpi-sub" id="storeKpiSub-proyeccion"></span><span class="store-kpi-comp" id="storeKpiComp-proyeccion" hidden></span><span class="store-kpi-spark" id="storeKpiSpark-proyeccion"></span></button>
+            <button class="store-kpi-card" data-store-metric="conversion" type="button"><span class="store-kpi-index">03</span><span class="store-kpi-label">Conversión %</span><span class="store-kpi-value" id="storeKpiValue-conversion">—</span><span class="store-kpi-sub" id="storeKpiSub-conversion"></span><span class="store-kpi-comp" id="storeKpiComp-conversion" hidden></span><span class="store-kpi-spark" id="storeKpiSpark-conversion"></span></button>
+            <button class="store-kpi-card" data-store-metric="ticket" type="button"><span class="store-kpi-index">04</span><span class="store-kpi-label">Ticket Promedio $</span><span class="store-kpi-value" id="storeKpiValue-ticket">—</span><span class="store-kpi-sub" id="storeKpiSub-ticket"></span><span class="store-kpi-comp" id="storeKpiComp-ticket" hidden></span><span class="store-kpi-spark" id="storeKpiSpark-ticket"></span></button>
+            <button class="store-kpi-card" data-store-metric="trafico" type="button"><span class="store-kpi-index">05</span><span class="store-kpi-label">Tráfico</span><span class="store-kpi-value" id="storeKpiValue-trafico">—</span><span class="store-kpi-sub" id="storeKpiSub-trafico"></span><span class="store-kpi-comp" id="storeKpiComp-trafico" hidden></span><span class="store-kpi-spark" id="storeKpiSpark-trafico"></span></button>
+            <button class="store-kpi-card" data-store-metric="pagos" type="button"><span class="store-kpi-index">06</span><span class="store-kpi-label">Medios de Pago</span><span class="store-kpi-value" id="storeKpiValue-pagos">—</span><span class="store-kpi-sub" id="storeKpiSub-pagos"></span><span class="store-kpi-comp" id="storeKpiComp-pagos" hidden></span><span class="store-kpi-spark" id="storeKpiSpark-pagos"></span></button>
           </div>
           <article class="panel panel-standalone" id="storeChartPanel"><div class="panel-head"><div><span class="section-kicker" id="storeChartKicker">VENTA VS. OBJETIVO</span><h2 id="storeChartHeading">Venta real vs. objetivo, por día</h2></div></div><div id="storeChartArea"></div></article>
           <div class="split-grid lower-grid"><article class="panel panel-flex"><div class="panel-head"><div><span class="section-kicker">EMBUDO DEL LOCAL</span><h2>Tráfico → venta</h2></div></div><div id="storeFunnel" class="funnel empty-state">Sin datos</div></article><article class="panel panel-flex"><div class="panel-head"><div><span class="section-kicker">DIAGNÓSTICO</span><h2>Dónde está la falla</h2></div></div><div id="storeDiagnosis" class="store-diagnosis empty-state">Sin datos</div></article></div>

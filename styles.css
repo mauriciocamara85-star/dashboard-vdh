@@ -1200,3 +1200,23 @@ html[data-theme="light"] .acum-local{--acum:#0284C7}
 #storeBreakdownPanel>.panel+.panel{margin-top:22px}
 /* La tabla se estira hasta el borde del panel solo cuando es lo último: si abajo viene algo (ganadores del GP), quedaba encimado */
 .table-wrap:not(:last-child){margin-bottom:0}
+/* Comparar con (Locales): selector, % en las tarjetas y serie punteada en los gráficos.
+   La comparación tiene color propio (violeta) para no confundirse con las líneas grises del objetivo. */
+:root{--comp:#C4B5FD}
+html[data-theme="light"]{--comp:#7C3AED}
+.comp-dropdown{min-width:290px;left:auto;right:0}
+.comp-rango{margin:8px 6px 0;max-width:290px;font-size:11.5px;line-height:1.45;color:var(--muted)}
+.comp-rango b{color:var(--white);font-weight:600}
+.store-kpi-comp{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.store-kpi-comp[hidden]{display:none}
+.comp-sube{color:var(--mint)}
+.comp-baja{color:var(--red)}
+.comp-neutro,.comp-igual{color:var(--soft)}
+.comp-ref{color:var(--muted);font-weight:500}
+.spark-comp{fill:none;stroke:var(--comp);stroke-width:1.25;stroke-dasharray:3 3;opacity:.8;vector-effect:non-scaling-stroke}
+.cm-comp-linea{fill:none;stroke:var(--comp);stroke-width:2;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
+.cm-comp-marca,.daily-comp-marca{stroke:var(--comp);stroke-width:2.5;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
+.cm-key i.cm-key-comp{height:0;border-top:2px dashed var(--comp);border-radius:0}
+.line-comp{stroke:var(--comp)!important;stroke-dasharray:6 5;opacity:1}
+.acum-local .line-node-prior{fill:var(--comp)}
+.legend-swatch-comp{background:repeating-linear-gradient(90deg,var(--comp) 0 3px,transparent 3px 5px)!important;height:3px!important}

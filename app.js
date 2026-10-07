@@ -1,5 +1,5 @@
 const DATA_ENDPOINT='https://script.google.com/macros/s/AKfycbyuS6K8oq2KWJ6BMSayHXHHSf0v2jr70OoSD4UfwX77cD3OobN1OrzFsTTXC6JI9Yo/exec';
-const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta'};
+const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta',comp:{modo:'none',desde:''}};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
 // de refresh) para reemplazar los emoji de navegación/medallero por vectores consistentes en el
@@ -2374,7 +2374,8 @@ function renderCumulativeChart(container,rows,monthCtx,opts={}){
 
   // Semestre anterior: null hoy (primer semestre trackeado, sin tabla LOCAL_DIARIO_ANTERIOR todavía) —
   // se arma la lógica igual para que la línea aparezca sola apenas exista el primer dato.
-  const priorSeries=opts.sinHistorial?null:priorSemesterSeries(domainStart);
+  const priorSeries=opts.comparacion?opts.comparacion.series:(opts.sinHistorial?null:priorSemesterSeries(domainStart));
+  const etiquetaPrior=opts.comparacion?opts.comparacion.etiqueta:'Historial';
 
   const domainEnd=[lastDate,projection?.endDate,priorSeries?.length?priorSeries[priorSeries.length-1].date:null].filter(Boolean).sort().pop();
   const dayOffset=d=>Math.round((new Date(`${d}T00:00:00`)-new Date(`${domainStart}T00:00:00`))/86400000);
@@ -2405,7 +2406,7 @@ function renderCumulativeChart(container,rows,monthCtx,opts={}){
   // derecha. chart-legend-bottom la saca del position:absolute compartido con el resto de los charts
   // del dashboard (esos siguen arriba, tienen 2-3 items cortos y no tienen este problema) y la pone
   // en flujo normal después del eje, con wrap habilitado por si el panel se angosta.
-  const legend=`<div class="chart-legend chart-legend-bottom"><span><i class="legend-swatch" style="background:#52657d"></i>Ritmo objetivo</span><span><i class="legend-swatch" style="background:${color}"></i>Ventas reales</span>${projection?`<span><i class="legend-swatch legend-swatch-dashed"></i>Proyección (FCDP)</span>`:''}${bandPath?`<span><i class="legend-swatch" style="background:${colorBanda}"></i>Banda de confianza</span>`:''}${priorPath?`<span><i class="legend-swatch" style="background:var(--muted)"></i>Historial</span>`:''}</div>`;
+  const legend=`<div class="chart-legend chart-legend-bottom"><span><i class="legend-swatch" style="background:#52657d"></i>Ritmo objetivo</span><span><i class="legend-swatch" style="background:${color}"></i>Ventas reales</span>${projection?`<span><i class="legend-swatch legend-swatch-dashed"></i>Proyección (FCDP)</span>`:''}${bandPath?`<span><i class="legend-swatch" style="background:${colorBanda}"></i>Banda de confianza</span>`:''}${priorPath?`<span><i class="legend-swatch${opts.comparacion?' legend-swatch-comp':''}" style="background:var(--muted)"></i>${etiquetaPrior}</span>`:''}</div>`;
   // Puntos visibles en Objetivo/Real: con 1-2 días cargados el tramo real puede quedar apenas unos
   // píxeles de ancho junto a una proyección de meses — sin estos "nodos" esa línea corta se ve
   // directamente invisible al lado de la proyección. Con 1 solo día, el path ni siquiera dibuja
@@ -2429,8 +2430,8 @@ function renderCumulativeChart(container,rows,monthCtx,opts={}){
     const diasRestantesMes=Math.max(0,diasEnMes-diasTranscurridos);
     return`<div class="month-progress"><div class="month-progress-head"><span class="section-kicker">AVANCE DEL MES</span><span class="month-progress-stat">${diasTranscurridos} / ${diasEnMes} días · ${pct}%</span></div><div class="month-progress-track"><div class="month-progress-fill" style="width:${pct}%"></div></div><div class="month-progress-foot"><span>Quedan ${diasRestantesMes} día${diasRestantesMes===1?'':'s'}</span><span>${avgDailyReal!==null?money(avgDailyReal):'—'}/día real · ${avgDailyProy!==null?money(avgDailyProy):'—'}/día proy.</span></div></div>`;
   })():'';
-  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${opts.color?color:'#FF6B00'}" stop-opacity="0.25"></stop><stop offset="100%" stop-color="${opts.color?color:'#FF6B00'}" stop-opacity="0"></stop></linearGradient></defs>${bandPath?`<path class="line-band" d="${bandPath}"></path>`:''}<path class="line-area" d="${area}" style="fill:url(#${gradId})"></path>${priorPath?`<path class="line-prior" d="${priorPath}"></path>`:''}<path class="line-target" d="${path('cumTarget')}"></path>${projectionPath?`<path class="line-projection" d="${projectionPath}"></path>`:''}<path class="line-actual" d="${path('cumActual')}"></path>${nodesFor('cumTarget','line-node-target')}${nodesFor('cumActual','line-node-actual')}<circle class="line-dot" cx="${x(last.date).toFixed(1)}" cy="${y(last.cumActual).toFixed(1)}" r="4"><title>${money(last.cumActual)} al ${formatDateAR(last.date)}</title></circle><line class="hoy-line" x1="${hoyX.toFixed(1)}" y1="0" x2="${hoyX.toFixed(1)}" y2="${h}"></line><text class="hoy-label" x="${hoyLabelX.toFixed(1)}" y="10" text-anchor="${hoyAnchor}">HOY</text><line class="hover-line" x1="0" y1="0" x2="0" y2="${h}" style="display:none"></line>${hoverDots}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(domainStart)}</span><span>${money(last.cumActual)} vs ${money(last.cumTarget)}</span><span>${formatDateShortAR(domainEnd)}</span></div>${legend}${note}${monthProgress}`;
-  attachChartHover(container,{w,domainStart,domainSpan,x,y,points,lastDate,last,projection,priorSeries,color});
+  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${opts.color?color:'#FF6B00'}" stop-opacity="0.25"></stop><stop offset="100%" stop-color="${opts.color?color:'#FF6B00'}" stop-opacity="0"></stop></linearGradient></defs>${bandPath?`<path class="line-band" d="${bandPath}"></path>`:''}<path class="line-area" d="${area}" style="fill:url(#${gradId})"></path>${priorPath?`<path class="line-prior${opts.comparacion?' line-comp':''}" d="${priorPath}"></path>`:''}<path class="line-target" d="${path('cumTarget')}"></path>${projectionPath?`<path class="line-projection" d="${projectionPath}"></path>`:''}<path class="line-actual" d="${path('cumActual')}"></path>${nodesFor('cumTarget','line-node-target')}${nodesFor('cumActual','line-node-actual')}<circle class="line-dot" cx="${x(last.date).toFixed(1)}" cy="${y(last.cumActual).toFixed(1)}" r="4"><title>${money(last.cumActual)} al ${formatDateAR(last.date)}</title></circle><line class="hoy-line" x1="${hoyX.toFixed(1)}" y1="0" x2="${hoyX.toFixed(1)}" y2="${h}"></line><text class="hoy-label" x="${hoyLabelX.toFixed(1)}" y="10" text-anchor="${hoyAnchor}">HOY</text><line class="hover-line" x1="0" y1="0" x2="0" y2="${h}" style="display:none"></line>${hoverDots}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(domainStart)}</span><span>${money(last.cumActual)} vs ${money(last.cumTarget)}</span><span>${formatDateShortAR(domainEnd)}</span></div>${legend}${note}${monthProgress}`;
+  attachChartHover(container,{w,domainStart,domainSpan,x,y,points,lastDate,last,projection,priorSeries,color,priorLabel:etiquetaPrior,priorColor:opts.comparacion?'var(--comp)':'var(--muted)'});
 }
 // Tooltip al pasar el mouse (o el dedo) sobre el gráfico: convierte la posición X en una fecha del
 // período mostrado y arma una fila por serie con su valor en ese punto — así se entiende de un
@@ -2469,7 +2470,7 @@ function attachChartHover(container,cfg){
     place(dotActual,hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumActual',hoverDate):null,'Ventas reales',cfg.color||'#F97316');
     place(dotProjection,cfg.projection?projectionValueAt(hoverDate):null,'Proyección (FCDP)',cfg.color||'#F97316');
     const priorInRange=cfg.priorSeries?.length&&hoverDate<=cfg.priorSeries[cfg.priorSeries.length-1].date;
-    place(dotPrior,priorInRange?valueAtStep(cfg.priorSeries,'cumActual',hoverDate):null,'Historial','var(--muted)');
+    place(dotPrior,priorInRange?valueAtStep(cfg.priorSeries,'cumActual',hoverDate):null,cfg.priorLabel||'Historial',cfg.priorColor||'var(--muted)');
     if(!rows.length)return hide();
     tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(hoverDate)}</div>${rows.map(r=>`<div class="chart-tooltip-row"><i style="background:${r.color}"></i><span>${r.label}</span><strong>${money(r.value)}</strong></div>`).join('')}`;
     tooltipEl.hidden=false;
@@ -2532,7 +2533,7 @@ function renderDailyComparison(daily){
 }
 // Hover sobre CUALQUIER punto del grupo del día (no solo encima de una barra puntual): resalta las
 // dos barras de ese día juntas y arma la tarjeta con Fecha/Venta real/Objetivo/Desvío.
-function attachDailyHover(container,daily,groupCenter){
+function attachDailyHover(container,daily,groupCenter,comp=null){
   const svgEl=container.querySelector('.daily-chart'),tooltipEl=container.querySelector('.chart-tooltip');
   if(!svgEl||!tooltipEl)return;
   let hoveredIdx=-1;
@@ -2552,7 +2553,7 @@ function attachDailyHover(container,daily,groupCenter){
     daily.forEach((d,i)=>{const dist=Math.abs(groupCenter(i)-svgX);if(dist<best){best=dist;idx=i}});
     setHighlight(idx);
     const d=daily[idx],delta=d.actual-d.target,deltaPct=d.target?delta/d.target*100:null,realColor=!d.target?'var(--muted)':{good:'var(--mint)',warning:'var(--amber)',bad:'var(--red)'}[statusTone(d.actual/d.target)];
-    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(d.date)}</div><div class="chart-tooltip-row"><i style="background:${realColor}"></i><span>Venta real</span><strong>${money(d.actual)}</strong></div><div class="chart-tooltip-row"><i style="background:var(--muted)"></i><span>Objetivo del día</span><strong>${d.target?money(d.target):'sin cargar'}</strong></div>${d.target?`<div class="chart-tooltip-row"><i style="background:${delta>=0?'var(--mint)':'var(--red)'}"></i><span>Desvío</span><strong>${delta>=0?'+':''}${money(delta)} (${deltaPct>=0?'+':''}${percent(deltaPct)})</strong></div>`:''}`;
+    tooltipEl.innerHTML=`<div class="chart-tooltip-date">${formatDateAR(d.date)}</div><div class="chart-tooltip-row"><i style="background:${realColor}"></i><span>Venta real</span><strong>${money(d.actual)}</strong></div><div class="chart-tooltip-row"><i style="background:var(--muted)"></i><span>Objetivo del día</span><strong>${d.target?money(d.target):'sin cargar'}</strong></div>${d.target?`<div class="chart-tooltip-row"><i style="background:${delta>=0?'var(--mint)':'var(--red)'}"></i><span>Desvío</span><strong>${delta>=0?'+':''}${money(delta)} (${deltaPct>=0?'+':''}${percent(deltaPct)})</strong></div>`:''}${comp?filaComparacion(comp,d.date,(comp.dia(d.date)||{}).actual,money,'pct',d.actual):''}`;
     tooltipEl.hidden=false;
     tooltipEl.style.left=`${Math.min(92,Math.max(8,clientX/rect.width*100))}%`;
   };
@@ -2756,6 +2757,109 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
 
   $('deviationCard').innerHTML=rowLocales+rowOnline+rowPeso+rowBanner;
 }
+// ── COMPARACIÓN (solo Locales, pedido 2026-10-07) ───────────────────────────────────────────────
+// Compara el período elegido arriba contra otro con la MISMA cantidad de días, que arranca en la
+// fecha que elija el usuario: libre, cualquier día cargado. "Semana anterior" y "4 semanas atrás"
+// son atajos que completan esa fecha; los dos caen en el mismo día de la semana (un "mes anterior"
+// de calendario compararía el martes 6/10 con el domingo 6/9). Como en Tienda Nube, al comparar
+// cambian tres cosas: el % de variación abajo de cada tarjeta, una línea punteada con el período
+// comparado en los gráficos y, en el detalle de cada día, el valor del día equivalente.
+const COMP_ATAJOS={semana:7,'4semanas':28};
+function diasEntre(a,b){return Math.round((new Date(`${b}T00:00:00`)-new Date(`${a}T00:00:00`))/86400000)}
+// Período que se está mirando en Locales: desde el "Desde" elegido (o el primer día con datos si no
+// hay filtro de fecha) hasta el último día cargado — el mismo corte de las tarjetas.
+function rangoPrincipalLocales(rows){
+  const fechas=rows.map(r=>normalizeDate(r.Fecha)).filter(Boolean).sort();
+  if(!fechas.length)return null;
+  const desde=$('fromDate').value||fechas[0],hasta=objectiveCutoff();
+  if(!desde||!hasta||desde>hasta)return null;
+  return{desde,hasta,dias:diasEntre(desde,hasta)+1};
+}
+function rangoComparacion(principal,comp=state.comp){
+  if(!principal||!comp||comp.modo==='none')return null;
+  const desde=COMP_ATAJOS[comp.modo]?addDaysKey(principal.desde,-COMP_ATAJOS[comp.modo]):comp.desde;
+  if(!desde)return null;
+  return{desde,hasta:addDaysKey(desde,principal.dias-1),dias:principal.dias,corrimiento:diasEntre(desde,principal.desde)};
+}
+function etiquetaRango(r){return r.desde===r.hasta?`${diaCortoDe(r.desde)} ${formatDateShortAR(r.desde)}`:`${formatDateShortAR(r.desde)} → ${formatDateShortAR(r.hasta)}`}
+function primerDiaCargado(){const f=(state.tables.LOCAL_DIARIO||[]).filter(r=>num(r,'Venta real')>0).map(r=>normalizeDate(r.Fecha)).filter(Boolean).sort();return f[0]||''}
+// Promedio de una columna que viene como valor del mes repetido en cada día (Efectivo, Tarjeta…),
+// solo sobre los días que la traen cargada — mismo criterio que renderStores.
+function promedioCargado(rows,key){const v=rows.map(r=>num(r,key)).filter(Boolean);return v.length?v.reduce((a,b)=>a+b,0)/v.length:0}
+// Los números del período comparado, con los mismos cálculos que las tarjetas (aggregate y
+// sumarPonderado) y el mismo filtro de local. dia(fecha) da el día equivalente a una fecha del
+// período elegido (corrida por la diferencia entre los dos inicios).
+function datosComparacion(rows){
+  const principal=rangoPrincipalLocales(rows),rango=rangoComparacion(principal);
+  if(!rango)return null;
+  const local=$('localFilter').value,primero=primerDiaCargado(),ultimo=lastLoadedDate('LOCAL_DIARIO');
+  rango.parcial=Boolean((primero&&rango.desde<primero)||(ultimo&&rango.hasta>ultimo));
+  const filas=(state.tables.LOCAL_DIARIO||[]).filter(r=>{const f=normalizeDate(r.Fecha);return f&&f>=rango.desde&&f<=rango.hasta&&(!ultimo||f<=ultimo)&&(local==='all'||String(r.Local??'')===local)});
+  if(!filas.some(r=>num(r,'Venta real')>0))return{rango,vacio:true};
+  const a=aggregate(filas);
+  const p=cerrarPonderado(filas.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado()));
+  const daily=storeDailySeries(filas),porFecha=Object.fromEntries(daily.map(d=>[d.date,d]));
+  const fechaDe=fecha=>addDaysKey(fecha,-rango.corrimiento);
+  return{rango,a,conv:p.conversion,ticket:p.ticket,efectivo:promedioCargado(filas,'Efectivo'),daily,fechaDe,dia:fecha=>porFecha[fechaDe(fecha)]||null};
+}
+// "↑ 8,2% vs. 24/09 → 29/09". tipo 'pts' para las tasas (conversión, % de efectivo): la resta de
+// dos porcentajes son puntos, no un % relativo. neutro: subir o bajar no es bueno ni malo.
+function variacionHtml(actual,anterior,{tipo='pct',neutro=false,rango}={}){
+  const ref=`<span class="comp-ref">vs. ${etiquetaRango(rango)}${rango.parcial?' (parcial)':''}</span>`;
+  if(anterior===null||anterior===undefined||!Number.isFinite(anterior)||(tipo==='pct'&&!anterior))return `<span class="comp-ref">sin dato para comparar en ${etiquetaRango(rango)}</span>`;
+  const d=tipo==='pts'?actual-anterior:(actual/anterior-1)*100,igual=Math.abs(d)<0.05;
+  const txt=tipo==='pts'?`${Math.abs(d).toFixed(1).replace('.',',')} pts`:percent(Math.abs(d));
+  const cls=igual?'comp-igual':neutro?'comp-neutro':d>0?'comp-sube':'comp-baja';
+  return `<span class="${cls}">${igual?'=':d>0?'↑':'↓'} ${txt}</span> ${ref}`;
+}
+// Serie del período comparado alineada día por día con la del período elegido (null = sin dato).
+function compSerie(ctx,datos,campo){const c=ctx&&ctx.comp&&!ctx.comp.vacio?ctx.comp:null;return c?datos.map(x=>{const cd=c.dia(x.d.date);return cd&&cd[campo]>0?cd[campo]:null}):null}
+function claveComp(ctx){const c=ctx&&ctx.comp&&!ctx.comp.vacio?ctx.comp:null;return c?[['cm-key-comp',`Comparación · ${etiquetaRango(c.rango)}`]]:[]}
+// Fila del detalle de un día con el día equivalente del período comparado.
+function filaComparacion(comp,fecha,valor,fmt,tipo,actual){
+  if(!comp||comp.vacio)return'';
+  const fc=comp.fechaDe(fecha),etiqueta=`${diaCortoDe(fc)} ${formatDateShortAR(fc)}`;
+  if(!(valor>0))return tipFila('var(--comp)',etiqueta,'sin dato');
+  let delta='';
+  if(actual>0){const d=tipo==='pts'?actual-valor:(actual/valor-1)*100;delta=` <span class="${d>=0?'good':'bad'}">${d>=0?'+':'−'}${tipo==='pts'?`${Math.abs(d).toFixed(1).replace('.',',')} pts`:percent(Math.abs(d))}</span>`}
+  return tipFila('var(--comp)',etiqueta,`${fmt(valor)}${delta}`);
+}
+// ── Selector "Comparar con" (mismo lenguaje que Período / Período seleccionado) ──
+const compUI={fp:null,borrador:null,sincronizando:false};
+function textoBotonComp(){const c=state.comp;if(c.modo==='semana')return'Semana anterior';if(c.modo==='4semanas')return'4 semanas atrás';if(c.modo==='fecha'&&c.desde)return`Desde ${formatDateShortAR(c.desde)}`;return'Sin comparar'}
+function refrescarPanelComp(){
+  const b=compUI.borrador;
+  qa('.comp-atajo').forEach(btn=>btn.classList.toggle('active',btn.dataset.comp===b.modo));
+  const principal=rangoPrincipalLocales(rowsThroughToday(activeRows('LOCAL_DIARIO'))),rango=rangoComparacion(principal,b);
+  const cuantos=n=>`${n} día${n===1?'':'s'}`;
+  $('compRango').innerHTML=!principal?'Elegí arriba un período con días cargados.'
+    :!rango?`Período elegido: ${etiquetaRango(principal)} (${cuantos(principal.dias)}). Tocá un atajo o una fecha del calendario.`
+    :`Compara <b>${etiquetaRango(principal)}</b> con <b>${etiquetaRango(rango)}</b>: ${cuantos(rango.dias)}, los mismos que el período elegido.`;
+  $('compApplyBtn').disabled=b.modo!=='none'&&!rango;
+  if(compUI.fp){compUI.sincronizando=true;if(rango)compUI.fp.setDate(rango.desde,false);else compUI.fp.clear();compUI.sincronizando=false}
+}
+function abrirPanelComp(){
+  compUI.borrador={...state.comp};
+  closePeriodDropdown();closeCalendarDropdown();
+  $('compDropdown').hidden=false;$('compBtn').setAttribute('aria-expanded','true');
+  if(!compUI.fp&&window.flatpickr){
+    if(flatpickr.l10ns&&flatpickr.l10ns.es)flatpickr.localize(flatpickr.l10ns.es);
+    compUI.fp=flatpickr($('compCalendar'),{inline:true,mode:'single',dateFormat:'Y-m-d',monthSelectorType:'static',
+      onChange:sel=>{if(compUI.sincronizando||!sel.length)return;compUI.borrador={modo:'fecha',desde:normalizeDate(sel[0])};refrescarPanelComp()}});
+  }
+  // Solo días con datos: antes del primero o después del último no hay con qué comparar.
+  if(compUI.fp){const primero=primerDiaCargado(),ultimo=lastLoadedDate('LOCAL_DIARIO');if(primero)compUI.fp.set('minDate',primero);if(ultimo)compUI.fp.set('maxDate',ultimo)}
+  refrescarPanelComp();
+}
+function cerrarPanelComp(){const dd=$('compDropdown');if(dd&&!dd.hidden){dd.hidden=true;$('compBtn').setAttribute('aria-expanded','false')}}
+function initComparacion(){
+  if(!$('compBtn'))return;
+  $('compBtn').addEventListener('click',e=>{e.stopPropagation();$('compDropdown').hidden?abrirPanelComp():cerrarPanelComp()});
+  document.addEventListener('click',e=>{if(!$('compField').contains(e.target))cerrarPanelComp()});
+  qa('.comp-atajo').forEach(btn=>btn.addEventListener('click',()=>{compUI.borrador={modo:btn.dataset.comp,desde:''};refrescarPanelComp()}));
+  $('compCancelBtn').addEventListener('click',cerrarPanelComp);
+  $('compApplyBtn').addEventListener('click',()=>{state.comp={...compUI.borrador};$('compBtnText').textContent=textoBotonComp();cerrarPanelComp();render()});
+}
 function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;
   // Ponderados sobre todo el período, no promedio de los valores diarios (ver sumarPonderado).
   const pondLocal=cerrarPonderado(rows.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado()));
@@ -2799,6 +2903,7 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   // sumEntityProjections, auditoría 2026-09-06).
   const projection=sumEntityProjections(allMonthRows,row=>row.Local);
   const daily=storeDailySeries(rows);
+  const comp=datosComparacion(rows);
   // "Avance del mes" del acumulado de Venta vs. objetivo: misma cuenta que en Resumen general
   // (monthProgressCtx), sobre el local filtrado. Días del mes en curso con datos hasta el último
   // cargado; el ritmo proyectado sale de la misma proyección ponderada de la tarjeta 02.
@@ -2806,7 +2911,7 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   const diasMesCargados=new Set(filasMesCargadas.map(row=>normalizeDate(row.Fecha))).size,ventaMesCargada=aggregate(filasMesCargadas).actual;
   const monthCtx={monthTarget,diasEnMes:daysInCalendarMonth(corteMes),diasTranscurridos:diasMesCargados,avgDailyReal:diasMesCargados?ventaMesCargada/diasMesCargados:null,
     avgDailyProy:projection?(projection.ponderada-projection.actual)/Math.max(1,projection.diasRestantes):null};
-  const kpiCtx={a,ratio,avgConv,avgConvObj,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection,rows,monthCtx};
+  const kpiCtx={a,ratio,avgConv,avgConvObj,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection,rows,monthCtx,comp};
   renderStoreKpiGrid(kpiCtx,daily);
   renderStoreChart(daily,kpiCtx);
 
@@ -2944,7 +3049,8 @@ const STORE_KPI_META={
 // preserveAspectRatio="none" estira el viewBox a lo ancho de la tarjeta; la línea lleva
 // vector-effect="non-scaling-stroke" para no engordar con ese estirón. Por eso tampoco hay punto
 // final: un círculo en un SVG estirado sale ovalado.
-function sparklineSvg(valores){
+function sparklineSvg(valores,comparacion=null){
+  if(comparacion)return sparklineComparadaSvg(valores,comparacion);
   const pts=valores.filter(v=>v!==null&&v!==undefined&&!Number.isNaN(v)&&Number.isFinite(v));
   if(pts.length<2)return'';
   const w=100,h=28,min=Math.min(...pts),max=Math.max(...pts),span=(max-min)||1;
@@ -2955,6 +3061,23 @@ function sparklineSvg(valores){
   const linea=pts.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`+
     `<path class="spark-area" d="${linea} L${w} ${h} L0 ${h} Z"></path>`+
+    `<path class="spark-line" d="${linea}"></path></svg>`;
+}
+// Con comparación las dos líneas comparten escala y cada día va en su lugar del eje (un día sin dato
+// queda como hueco), así el mismo punto horizontal es el mismo día de cada período. La comparada va
+// punteada y más tenue, como en Tienda Nube.
+function sparklineComparadaSvg(valores,comparacion){
+  const ok=v=>v!==null&&v!==undefined&&!Number.isNaN(v)&&Number.isFinite(v);
+  if(valores.filter(ok).length<2)return'';
+  const todos=[...valores,...comparacion].filter(ok),n=valores.length;
+  const w=100,h=28,min=Math.min(...todos),max=Math.max(...todos),span=(max-min)||1,plana=max===min;
+  const x=i=>n>1?i/(n-1)*w:w/2,y=v=>plana?h/2:h-2-((v-min)/span)*(h-5);
+  const trazo=arr=>{let d='',abierto=false;arr.forEach((v,i)=>{if(!ok(v)){abierto=false;return}d+=`${abierto?'L':'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;abierto=true});return d.trim()};
+  const linea=trazo(valores),comp=trazo(comparacion);
+  const primero=valores.findIndex(ok),ultimo=n-1-[...valores].reverse().findIndex(ok);
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">`+
+    `<path class="spark-area" d="${linea} L${x(ultimo).toFixed(1)} ${h} L${x(primero).toFixed(1)} ${h} Z"></path>`+
+    (comp?`<path class="spark-comp" d="${comp}"></path>`:'')+
     `<path class="spark-line" d="${linea}"></path></svg>`;
 }
 // "Medios de pago" no es una serie en el tiempo sino un reparto, así que en vez de una curva va una
@@ -2980,11 +3103,13 @@ function renderStoreKpiGrid(ctx,daily){
   let acum=0;
   const acumulado=serie.map(d=>(acum+=d.actual));
   const spark=(metrica,html)=>{const el=$(`storeKpiSpark-${metrica}`);if(el)el.innerHTML=html||''};
-  spark('venta',sparklineSvg(serie.map(d=>d.actual)));
+  const cmp=ctx.comp&&!ctx.comp.vacio?ctx.comp:null;
+  const alineada=campo=>cmp?serie.map(d=>{const x=cmp.dia(d.date);return x?x[campo]:null}):null;
+  spark('venta',sparklineSvg(serie.map(d=>d.actual),alineada('actual')));
   spark('proyeccion',sparklineSvg(acumulado));
-  spark('conversion',sparklineSvg(serie.map(d=>d.conversion)));
-  spark('ticket',sparklineSvg(serie.map(d=>d.ticket)));
-  spark('trafico',sparklineSvg(serie.map(d=>d.traffic)));
+  spark('conversion',sparklineSvg(serie.map(d=>d.conversion),alineada('conversion')));
+  spark('ticket',sparklineSvg(serie.map(d=>d.ticket),alineada('ticket')));
+  spark('trafico',sparklineSvg(serie.map(d=>d.traffic),alineada('traffic')));
   spark('pagos',hasPayment?sparkStackSvg([{valor:avgCash,cls:'spark-seg-a'},{valor:avgCard,cls:'spark-seg-b'}]):'');
 
   $('storeKpiValue-venta').textContent=money(a.actual);
@@ -3022,6 +3147,23 @@ function renderStoreKpiGrid(ctx,daily){
 
   $('storeKpiValue-pagos').textContent=hasPayment?percent(avgCash*100):'—';
   $('storeKpiSub-pagos').textContent=hasPayment?`Efvo. · Tarjeta ${percent(avgCard*100)} · Desc. ${percent(avgDiscount*100)}`:'Agregar columna en el Sheet';
+  // % de variación contra el período comparado, abajo de cada tarjeta. No llevan la proyección de
+  // cierre (es del mes en curso, no del período elegido) ni medios de pago: Efectivo/Tarjeta se
+  // cargan como un valor del MES repetido en cada día, así que comparar dos fechas compararía dos
+  // meses (Rivadavia: 62% de efectivo en septiembre contra 31% en octubre), no dos días.
+  const compTxt=(m,html)=>{const el=$(`storeKpiComp-${m}`);if(!el)return;el.innerHTML=html||'';el.hidden=!html};
+  const metricas=['venta','proyeccion','conversion','ticket','trafico','pagos'];
+  if(!ctx.comp)metricas.forEach(m=>compTxt(m,''));
+  else if(ctx.comp.vacio){const t=`<span class="comp-ref">sin datos en ${etiquetaRango(ctx.comp.rango)}</span>`;metricas.forEach(m=>compTxt(m,m==='proyeccion'||m==='pagos'?'':t))}
+  else{
+    const r=ctx.comp.rango;
+    compTxt('venta',variacionHtml(a.actual,cmp.a.actual,{rango:r}));
+    compTxt('proyeccion','');
+    compTxt('conversion',variacionHtml(avgConv*100,cmp.conv*100,{tipo:'pts',rango:r}));
+    compTxt('ticket',variacionHtml(avgTicket,cmp.ticket,{rango:r}));
+    compTxt('trafico',variacionHtml(a.traffic,cmp.a.traffic,{rango:r}));
+    compTxt('pagos','');
+  }
 }
 // ── Panel de detalle de Locales: módulos de análisis ─────────────────────────────
 // Cada métrica del panel de abajo pasa a ser una franja de tarjetas con las cifras del período más
@@ -3079,9 +3221,9 @@ function moduloAnalisisHtml(stats,cuerpo,pie){
 // vector-effect="non-scaling-stroke".
 //
 // `datos` llega como [{d,v,obj,estado}]: quién llama sabe qué es cada número y arma las tarjetas.
-function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
+function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm,comparacion=null}){
   const n=datos.length;
-  const maximo=Math.max(1,...datos.map(x=>Math.max(x.v,x.estado==='cerrado'?0:x.obj)));
+  const maximo=Math.max(1,...datos.map((x,i)=>Math.max(x.v,x.estado==='cerrado'?0:x.obj,comparacion&&comparacion[i]>0?comparacion[i]:0)));
   const{ticks,tope}=escalaRedonda(maximo);
   const Y=v=>1000-(v/tope)*1000;
   const banda=1000/n,ancho=Math.min(banda*.62,48);
@@ -3097,10 +3239,11 @@ function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
   }).join('');
   const marcasObj=datos.map((x,i)=>(x.obj>0&&(x.estado==='ok'||x.estado==='parcial'))?`<line class="cm-obj" x1="${(X(i)-banda*.08).toFixed(1)}" x2="${(X(i)+ancho+banda*.08).toFixed(1)}" y1="${Y(x.obj).toFixed(1)}" y2="${Y(x.obj).toFixed(1)}"></line>`:'').join('');
 
+  const marcasComp=comparacion?comparacion.map((v,i)=>v>0?`<line class="cm-comp-marca" x1="${(X(i)-banda*.08).toFixed(1)}" x2="${(X(i)+ancho+banda*.08).toFixed(1)}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"></line>`:'').join(''):'';
   const rotulos=rotulosDelModulo(datos);
   const{ejeY,ejeX}=ejesHtml(ticks,fmtEje,datos,posX,posY);
   const promTxt=promedio>0?`<div class="cm-prom-label" style="top:${posY(promedio)}%">${etiquetaProm}</div>`:'';
-  return`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${grillaSvg(ticks,Y)}${promedio>0?lineaHorizontalSvg('cm-prom',Y(promedio)):''}${barras}${marcasObj}</svg>${promTxt}${marcasDiaHtml(datos,rotulos,posX,posY)}${calloutsHtml(rotulos,fmt,posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+  return`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${grillaSvg(ticks,Y)}${promedio>0?lineaHorizontalSvg('cm-prom',Y(promedio)):''}${barras}${marcasObj}${marcasComp}</svg>${promTxt}${marcasDiaHtml(datos,rotulos,posX,posY)}${calloutsHtml(rotulos,fmt,posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
 }
 
 // Línea diaria para los indicadores que son una TASA (conversión, ticket): sumar días no tiene
@@ -3117,10 +3260,11 @@ function barrasDiariasHtml({datos,fmt,fmtEje,promedio,etiquetaProm}){
 //     del día bajo el cursor aparece al pasar. Son HTML porque un círculo en el SVG estirado sale
 //     ovalado.
 // Devuelve {html,posY}: posY lo usa el tooltip para ubicar el punto del día bajo el cursor.
-function lineaDiariaHtml({datos,fmt,fmtEje,objetivo,etiquetaObj,referencia,etiquetaRef,color,gradId}){
+function lineaDiariaHtml({datos,fmt,fmtEje,objetivo,etiquetaObj,referencia,etiquetaRef,color,gradId,comparacion=null}){
   const n=datos.length;
   const visibles=datos.filter(x=>x.v>0&&(x.estado==='ok'||x.estado==='parcial')).map(x=>x.v);
-  const{ticks,tope}=escalaRedonda(Math.max(1,...visibles,objetivo||0,referencia||0));
+  const compVals=(comparacion||[]).filter(v=>v>0);
+  const{ticks,tope}=escalaRedonda(Math.max(1,...visibles,objetivo||0,referencia||0,...compVals));
   const Y=v=>1000-(v/tope)*1000,banda=1000/n,centro=i=>(i+.5)*banda;
   const posX=i=>(centro(i)/10).toFixed(2),posY=v=>(Y(v)/10).toFixed(2);
 
@@ -3131,6 +3275,7 @@ function lineaDiariaHtml({datos,fmt,fmtEje,objetivo,etiquetaObj,referencia,etiqu
   const largos=tramos.filter(t=>t.length>1);
   const areas=largos.map(t=>`<path class="cm-area" fill="url(#${gradId})" d="${trazo(t)} L${centro(t[t.length-1]).toFixed(1)} 1000 L${centro(t[0]).toFixed(1)} 1000 Z"></path>`).join('');
   const lineas=largos.map(t=>`<path class="cm-linea" d="${trazo(t)}"></path>`).join('');
+  const compPath=comparacion?(()=>{let d='',abierto=false;comparacion.forEach((v,i)=>{if(!(v>0)){abierto=false;return}d+=`${abierto?'L':'M'}${centro(i).toFixed(1)} ${Y(v).toFixed(1)} `;abierto=true});return d?`<path class="cm-comp-linea" d="${d.trim()}"></path>`:''})():'';
 
   const rotulos=rotulosDelModulo(datos);
   const conPunto=new Set([
@@ -3145,7 +3290,7 @@ function lineaDiariaHtml({datos,fmt,fmtEje,objetivo,etiquetaObj,referencia,etiqu
     (referencia>0?`<div class="cm-ref-label cm-ref-izq" style="top:${posY(referencia)}%">${etiquetaRef}</div>`:'');
   const{ejeY,ejeX}=ejesHtml(ticks,fmtEje,datos,posX,posY);
   const defs=`<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".28"></stop><stop offset="100%" stop-color="currentColor" stop-opacity="0"></stop></linearGradient></defs>`;
-  const html=`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot" style="color:${color}"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${defs}${grillaSvg(ticks,Y)}${refs}${areas}${lineas}</svg>${refsTxt}${marcasDiaHtml(datos,rotulos,posX,posY)}<div class="cm-guia" hidden></div>${puntos}<div class="cm-punto cm-punto-hover" hidden></div>${calloutsHtml(rotulos,fmt,posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+  const html=`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot" style="color:${color}"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${defs}${grillaSvg(ticks,Y)}${refs}${areas}${compPath}${lineas}</svg>${refsTxt}${marcasDiaHtml(datos,rotulos,posX,posY)}<div class="cm-guia" hidden></div>${puntos}<div class="cm-punto cm-punto-hover" hidden></div>${calloutsHtml(rotulos,fmt,posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
   return{html,posY:x=>(x.v>0&&(x.estado==='ok'||x.estado==='parcial'))?`${posY(x.v)}%`:null};
 }
 
@@ -3280,8 +3425,8 @@ function renderStoreConversionModule(container,daily,ctx){
     {label:'Peor día',value:peor?percent(peor.v):'—',tone:peor&&obj?statusTone(peor.v/obj):'',sub:peor?fechaCorta(peor):''}
   ];
   const g=lineaDiariaHtml({datos,fmt:v=>percent(v),fmtEje:v=>`${number(v)}%`,objetivo:obj,etiquetaObj:`objetivo ${percent(obj)}`,
-    referencia:conv,etiquetaRef:`período ${percent(conv)}`,color:'var(--mint)',gradId:'cmGradConversion'});
-  const pie=pieModulo([['cm-key-linea','Conversión del día','background:var(--mint)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Conversión del período']],
+    referencia:conv,etiquetaRef:`período ${percent(conv)}`,color:'var(--mint)',gradId:'cmGradConversion',comparacion:compSerie(ctx,datos,'conversion')});
+  const pie=pieModulo([['cm-key-linea','Conversión del día','background:var(--mint)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Conversión del período'],...claveComp(ctx)],
     datos,d=>d.conConversion,'locales con conversión y tráfico');
   container.className='';
   container.innerHTML=moduloAnalisisHtml(stats,g.html,pie);
@@ -3291,7 +3436,8 @@ function renderStoreConversionModule(container,daily,ctx){
     return tipFecha(x.d)+tipFila('var(--mint)','Conversión',percent(x.v))+
       tipFila('','Personas',number(x.d.traffic))+
       (obj?tipFila('','Vs. objetivo',`<span class="${statusTone(x.v/obj)}">${pts(x.v-obj)}</span>`):'')+
-      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conConversion} de ${x.d.esperados} locales cargaron conversión y tráfico`):'');
+      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conConversion} de ${x.d.esperados} locales cargaron conversión y tráfico`):'')+
+      filaComparacion(ctx.comp,x.d.date,(ctx.comp&&!ctx.comp.vacio&&ctx.comp.dia(x.d.date)||{}).conversion,v=>percent(v),'pts',x.v);
   },g.posY);
 }
 
@@ -3328,8 +3474,8 @@ function renderStoreTicketModule(container,daily,ctx){
       sub:mejor?`${fechaCorta(mejor)}${peor?` · peor ${money(peor.v)} (${fechaCorta(peor)})`:''}`:''}
   ];
   const g=lineaDiariaHtml({datos,fmt:v=>money(v),fmtEje:v=>moneyShort(v),objetivo:obj,etiquetaObj:`objetivo ${money(obj)}`,
-    referencia:ticket,etiquetaRef:`período ${money(ticket)}`,color:'var(--coral)',gradId:'cmGradTicket'});
-  const pie=pieModulo([['cm-key-linea','Ticket del día','background:var(--coral)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Ticket del período']],
+    referencia:ticket,etiquetaRef:`período ${money(ticket)}`,color:'var(--coral)',gradId:'cmGradTicket',comparacion:compSerie(ctx,datos,'ticket')});
+  const pie=pieModulo([['cm-key-linea','Ticket del día','background:var(--coral)'],['cm-key-objlinea','Objetivo'],['cm-key-prom','Ticket del período'],...claveComp(ctx)],
     datos,d=>d.conVenta,'locales con venta');
   container.className='';
   container.innerHTML=moduloAnalisisHtml(stats,g.html,pie);
@@ -3339,12 +3485,13 @@ function renderStoreTicketModule(container,daily,ctx){
     return tipFecha(x.d)+tipFila('var(--coral)','Ticket',money(x.v))+
       tipFila('','Venta',money(x.d.actual))+
       (obj?tipFila('','Vs. objetivo',`<span class="${statusTone(x.v/obj)}">${signo((x.v/obj-1)*100)}</span>`):'')+
-      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conVenta} de ${x.d.esperados} locales cargaron venta`):'');
+      (x.estado==='parcial'?tipFila('',`Parcial: ${x.d.conVenta} de ${x.d.esperados} locales cargaron venta`):'')+
+      filaComparacion(ctx.comp,x.d.date,(ctx.comp&&!ctx.comp.vacio&&ctx.comp.dia(x.d.date)||{}).ticket,money,'pct',x.v);
   },g.posY);
 }
 
 // ── 05 · Tráfico ──
-function renderStoreTrafficModule(container,daily){
+function renderStoreTrafficModule(container,daily,ctx={}){
   const datos=daily.map(d=>({d,v:d.traffic,obj:d.trafficTarget,estado:estadoDelDia(d,d.conTrafico,d.traffic)}));
   if(!datos.some(x=>x.v>0)){container.className='empty-state';container.innerHTML='No hay tráfico cargado para estos filtros.';return}
   const completos=datos.filter(x=>x.estado==='ok'&&x.v>0);
@@ -3375,8 +3522,8 @@ function renderStoreTrafficModule(container,daily){
       sub:cumpl!==null?`${number(total)} de ${number(Math.round(objConDato))} personas necesarias`:'sin objetivo de tráfico cargado'}
   ];
 
-  const grafico=barrasDiariasHtml({datos,fmt:v=>number(v),fmtEje:v=>number(v),promedio,etiquetaProm:`promedio ${number(Math.round(promedio))}/día`});
-  const pie=pieModulo([['cm-key-bar','Personas por día'],['cm-key-obj','Objetivo del día'],['cm-key-prom','Promedio de los días completos']],datos,d=>d.conTrafico);
+  const grafico=barrasDiariasHtml({datos,fmt:v=>number(v),fmtEje:v=>number(v),promedio,etiquetaProm:`promedio ${number(Math.round(promedio))}/día`,comparacion:compSerie(ctx,datos,'traffic')});
+  const pie=pieModulo([['cm-key-bar','Personas por día'],['cm-key-obj','Objetivo del día'],['cm-key-prom','Promedio de los días completos'],...claveComp(ctx)],datos,d=>d.conTrafico);
   container.className='';
   container.innerHTML=moduloAnalisisHtml(stats,grafico,pie);
   engancharTooltipModulo(container,datos,x=>{
@@ -3387,7 +3534,8 @@ function renderStoreTrafficModule(container,daily){
     const r=x.obj?x.v/x.obj:null;
     return f+fila('var(--amber)','Personas',number(x.v))+
       (x.obj?fila('var(--white)','Objetivo',number(x.obj))+fila('','Cumplimiento',`<span class="${statusTone(r)}">${percent(r*100)}</span>`):'')+
-      (x.estado==='parcial'?fila('',`Parcial: cargaron ${x.d.conTrafico} de ${x.d.esperados} locales`):'');
+      (x.estado==='parcial'?fila('',`Parcial: cargaron ${x.d.conTrafico} de ${x.d.esperados} locales`):'')+
+      filaComparacion(ctx.comp,x.d.date,(ctx.comp&&!ctx.comp.vacio&&ctx.comp.dia(x.d.date)||{}).traffic,v=>`${number(v)} pers.`,'pct',x.v);
   });
 }
 
@@ -3403,21 +3551,28 @@ function renderStoreChart(daily,ctx){
   if(state.storeMetric==='proyeccion')return renderStoreProjectionChart(area,daily,ctx);
   if(state.storeMetric==='conversion')return renderStoreConversionModule(area,daily,ctx);
   if(state.storeMetric==='ticket')return renderStoreTicketModule(area,daily,ctx);
-  if(state.storeMetric==='trafico')return renderStoreTrafficModule(area,daily);
+  if(state.storeMetric==='trafico')return renderStoreTrafficModule(area,daily,ctx);
 }
 // Card 01: arriba el acumulado real vs. objetivo, igual al de Resumen general pero en celeste para
 // que se distinga (pedido 2026-10-07); abajo, el día a día con las barras semáforo de siempre.
 function renderStoreVentaAcumulada(area,daily,ctx){
   area.className='';
   area.innerHTML='<div id="storeVentaAcum" class="bar-chart acum-local"></div><div class="store-dia-a-dia"><span class="section-kicker">DÍA A DÍA</span><div id="storeVentaDiaria" class="bar-chart"></div></div>';
-  renderCumulativeChart($('storeVentaAcum'),ctx.rows||[],ctx.monthCtx,{color:'#38BDF8',colorBanda:'rgba(56,189,248,.22)',gradId:'areaGlowLocal',sinHistorial:true});
-  renderStoreVentaChart($('storeVentaDiaria'),daily);
+  // Con comparación, el acumulado del período comparado va como línea punteada, corrido para que
+  // cada día quede encima de su día equivalente.
+  const cmp=ctx.comp&&!ctx.comp.vacio?ctx.comp:null;
+  let acum=0;
+  const serieComp=cmp?cmp.daily.map(d=>{acum+=d.actual;return{date:addDaysKey(d.date,cmp.rango.corrimiento),cumActual:acum}}):null;
+  renderCumulativeChart($('storeVentaAcum'),ctx.rows||[],ctx.monthCtx,{color:'#38BDF8',colorBanda:'rgba(56,189,248,.22)',gradId:'areaGlowLocal',sinHistorial:true,
+    comparacion:serieComp&&serieComp.length?{series:serieComp,etiqueta:`Comparación · ${etiquetaRango(cmp.rango)}`}:null});
+  renderStoreVentaChart($('storeVentaDiaria'),daily,cmp);
 }
 // Card 01 — mismo lenguaje visual que "Día a día" del Resumen General (barras agrupadas
 // semáforo + roundedTopBarPath), reusado tal cual acá para no duplicar el estilo.
-function renderStoreVentaChart(container,daily){
+function renderStoreVentaChart(container,daily,comp=null){
   const w=760,h=190,baseline=h-4;
-  const maxVal=Math.max(...daily.map(d=>Math.max(d.actual,d.target)),1);
+  const ventaComp=d=>{const x=comp?comp.dia(d.date):null;return x?x.actual:0};
+  const maxVal=Math.max(...daily.map(d=>Math.max(d.actual,d.target,ventaComp(d))),1);
   const n=daily.length,band=w/n;
   // Mismos valores que "Día a día" del Resumen General (ver ese comentario) — quedaron desfasados
   // en la vuelta anterior porque el replace_all de ese momento no alcanzó a esta segunda copia.
@@ -3437,12 +3592,14 @@ function renderStoreVentaChart(container,daily){
     const targetTop=y(d.target),targetH=Math.max(0,baseline-targetTop);
     const actualPath=d.actual>0?`<path class="daily-bar daily-bar-actual ${actualCls}" data-day="${i}" d="${roundedTopBarPath(xActual(i),actualTop,barWidth,actualH,4)}"><title>${formatDateAR(d.date)} · Venta real: ${money(d.actual)}</title></path>`:'';
     const targetPath=d.target>0?`<path class="daily-bar daily-bar-target" data-day="${i}" d="${roundedTopBarPath(xTarget(i),targetTop,barWidth,targetH,4)}"><title>${formatDateAR(d.date)} · Objetivo: ${money(d.target)}</title></path>`:'';
-    return actualPath+targetPath;
+    const vc=ventaComp(d);
+    const compMark=vc>0?`<line class="daily-comp-marca" x1="${(xActual(i)-3).toFixed(1)}" x2="${(xActual(i)+barWidth+3).toFixed(1)}" y1="${y(vc).toFixed(1)}" y2="${y(vc).toFixed(1)}"></line>`:'';
+    return actualPath+targetPath+compMark;
   }).join('');
-  const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--amber)"></i>85% a 99%</span><span><i class="legend-swatch" style="background:var(--red)"></i>Menos de 85%</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span></div>`;
+  const legend=`<div class="chart-legend"><span><i class="legend-swatch" style="background:var(--mint)"></i>Día en objetivo</span><span><i class="legend-swatch" style="background:var(--amber)"></i>85% a 99%</span><span><i class="legend-swatch" style="background:var(--red)"></i>Menos de 85%</span><span><i class="legend-swatch" style="background:var(--muted)"></i>Objetivo del día</span>${comp?`<span><i class="legend-swatch legend-swatch-comp"></i>Venta ${etiquetaRango(comp.rango)}</span>`:''}</div>`;
   const first=daily[0],last=daily[daily.length-1];
   container.innerHTML=`${legend}<svg class="daily-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(first.date)}</span><span>${daily.length} día${daily.length===1?'':'s'}</span><span>${formatDateShortAR(last.date)}</span></div>`;
-  attachDailyHover(container,daily,groupCenter);
+  attachDailyHover(container,daily,groupCenter,comp);
 }
 // Card 02 — cumulado real + objetivo del mes (línea fija) + proyección punteada hasta fin de mes.
 function renderStoreProjectionChart(container,daily,ctx){
@@ -3730,6 +3887,8 @@ function switchView(view){
   // [[vdh-filters-layout-rule]]).
   $('periodPickerField').hidden=hideDates;
   $('periodCustomField').hidden=hideDates;
+  // "Comparar con" vive solo en Locales (ver datosComparacion).
+  if($('compField')){$('compField').hidden=view!=='stores';if(view!=='stores')cerrarPanelComp()}
   if(hideDates){closePeriodDropdown();closeCalendarDropdown()}
   $('metricsMonthLabel').hidden=!isSellerMetrics;
   $('metricsWeekLabel').hidden=!isSellerMetrics;
@@ -3863,12 +4022,12 @@ function initFlatpickr(){
 function initPeriodPicker(){
   $('periodPickerBtn').addEventListener('click',e=>{
     e.stopPropagation();
-    closeCalendarDropdown();
+    closeCalendarDropdown();cerrarPanelComp();
     $('periodDropdown').hidden?openPeriodDropdown():closePeriodDropdown();
   });
   $('periodCustomBtn').addEventListener('click',e=>{
     e.stopPropagation();
-    closePeriodDropdown();
+    closePeriodDropdown();cerrarPanelComp();
     $('periodCalendarDropdown').hidden?openCalendarDropdown():closeCalendarDropdown();
   });
   document.addEventListener('click',e=>{
@@ -4165,7 +4324,7 @@ if($('menuToggle'))$('menuToggle').addEventListener('click',()=>{
   aplicarMenu(oculto);
   try{localStorage.setItem('vdh-menu-oculto',oculto?'1':'0')}catch(e){}
 });
-applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
+applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{state.comp={modo:'none',desde:''};if($('compBtnText'))$('compBtnText').textContent='Sin comparar';['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
 // ── BOTTOM NAV + DRAWER (mobile) ──────────────────────────────
 qa('.bottom-nav-item[data-view]').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 function openMainDrawer(){$('mainDrawerBackdrop').hidden=false;$('mainDrawerPanel').hidden=false;$('mainDrawerToggle').setAttribute('aria-expanded','true')}
@@ -4174,7 +4333,7 @@ $('mainDrawerToggle').addEventListener('click',openMainDrawer);
 $('mainDrawerClose').addEventListener('click',closeMainDrawer);
 $('mainDrawerBackdrop').addEventListener('click',closeMainDrawer);
 qa('.drawer-item[data-drawer-view]').forEach(btn=>btn.addEventListener('click',()=>{switchView(btn.dataset.drawerView);closeMainDrawer()}));
-initPeriodPicker();
+initPeriodPicker();initComparacion();
 applyPeriodPreset(PERIODO_POR_DEFECTO,false);
 // Cambiar de mes vuelve a la última fecha de ese mes.
 engancharSaludModal();   // "Ver detalle" de Salud de locales y del equipo
