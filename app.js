@@ -284,8 +284,11 @@ function kpiTrendRow(delta,text,invert=false){
   const t=trendMeta(delta,invert);
   return `<div class="kpi-trend pill-${t.cls}"><span class="trend-arrow ${t.cls}">${t.icon}</span><span class="trend-text">${text}</span></div>`;
 }
-function kpiCard(label,value,detailText,detailTone,trendHtml,subText){
-  return `<div class="metric-card${trendHtml?' kpi-card':''}"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-detail ${detailTone}">${detailText}</div>${trendHtml||''}${subText?`<div class="kpi-subtrend">${subText}</div>`:''}</div>`;
+// `pct` (opcional): {valor, tono, etiqueta} → el porcentaje de desvío o cumplimiento en grande, entre
+// el monto y el texto de abajo (pedido 2026-10-07: antes iba chico, metido en la línea de detalle).
+function kpiCard(label,value,detailText,detailTone,trendHtml,subText,pct){
+  const pctHtml=pct?`<div class="kpi-pct"><strong class="${pct.tono||''}">${pct.valor}</strong><span>${pct.etiqueta||''}</span></div>`:'';
+  return `<div class="metric-card${trendHtml?' kpi-card':''}"><div class="metric-label">${label}</div><div class="metric-value">${value}</div>${pctHtml}<div class="metric-detail ${detailTone}">${detailText}</div>${trendHtml||''}${subText?`<div class="kpi-subtrend">${subText}</div>`:''}</div>`;
 }
 function donutSvg(segments){
   const r=26,cx=32,cy=32,circumference=2*Math.PI*r;
@@ -1916,19 +1919,24 @@ function renderOverview(){
   const cumplDelta=(a.target&&cumplAyer!==null)?ratioHoy*100-cumplAyer:null;
   const cumplTrend=kpiTrendRow(cumplDelta,cumplDelta!==null?`${cumplDelta>=0?'+':''}${cumplDelta.toFixed(1).replace('.',',')} pts vs. cierre de ayer`:'sin cierre de ayer para comparar');
   const desvioPct=a.target?(ratioHoy-1)*100:null;
-  const cumplDetalle=a.target
-    ?`Venta real ${money(a.actual)} · <span class="${statusTone(ratioHoy)}">${desvioPct>=0?'+':''}${percent(desvioPct)}</span>`
-    :'Sin objetivo cargado para este período';
+  const cumplDetalle=a.target?`Venta real ${money(a.actual)}`:'Sin objetivo cargado para este período';
+  const conSigno=v=>`${v>=0?'+':''}${percent(v)}`;
+  const pctDesvioHoy=a.target?{valor:conSigno(desvioPct),tono:statusTone(ratioHoy),etiqueta:'desvío contra lo esperado a hoy'}:null;
+  const pctCumplHoy=a.target?{valor:percent(ratioHoy*100),tono:statusTone(ratioHoy),etiqueta:'de cumplimiento a la fecha'}:null;
+  const pctCierre=proj&&monthTarget?{valor:conSigno(desvioProy/monthTarget*100),tono:statusTone(proj.ponderada/monthTarget),etiqueta:`proyectado contra el objetivo del mes (${new Intl.NumberFormat('es-AR',{maximumFractionDigits:1}).format(monthTarget/1e6)}M)`}:null;
 
   // Las 4 tarjetas: una sola métrica grande por tarjeta, sin pisarse entre sí — cada una responde
   // una pregunta distinta (venta hoy / desvío a la fecha / ritmo necesario / cierre proyectado).
+  // Cierre estimado va PRIMERO (pedido 2026-10-07): es la respuesta a "¿cómo terminamos el mes?",
+  // y las otras tres explican el cómo. El resto mantiene su orden.
   $('overviewMetrics').innerHTML=
-    kpiCard('Objetivo a la fecha',money(a.target),cumplDetalle,'',cumplTrend,null)+
+    kpiCard(`Cierre estimado${localMonth?` · ${localMonth}`:''}`,proj?money(proj.ponderada):'—',proj?`Lineal: ${money(proj.lineal)} · ${proj.diasRestantes} días restantes`:'Sin días cargados todavía','',cierreTrend,null,pctCierre)+
+    kpiCard('Objetivo a la fecha',money(a.target),cumplDetalle,'',cumplTrend,null,pctDesvioHoy)+
     // El monto esperado ya lo encabeza Card 1, así que acá no se repite: esta tarjeta aporta la
     // brecha en pesos, que es lo único que no se lee en ninguna otra.
-    kpiCard('Desvío a la fecha',`<span class="${a.target?statusTone(ratioHoy):''}">${deltaHoy>=0?'+':''}${money(deltaHoy)}</span>`,a.target?`${percent(ratioHoy*100)} de cumplimiento a la fecha`:'Sin objetivo cargado para este período','',desvioBadge,null)+
-    kpiCard('Ritmo necesario',ritmoNecesario!==null?`${money(ritmoNecesario)} /día`:'—',restanteMes!==null?`${diasRestantes} día${diasRestantes===1?'':'s'} restantes para cubrir ${money(restanteMes)}`:`${diasRestantes} día${diasRestantes===1?'':'s'} restantes del mes`,'',ritmoTrend,null)+
-    kpiCard(`Cierre estimado${localMonth?` · ${localMonth}`:''}`,proj?money(proj.ponderada):'—',proj?`Lineal: ${money(proj.lineal)} · ${proj.diasRestantes} días restantes`:'Sin días cargados todavía','',cierreTrend,null);
+    kpiCard('Desvío a la fecha',`<span class="${a.target?statusTone(ratioHoy):''}">${deltaHoy>=0?'+':''}${money(deltaHoy)}</span>`,a.target?'brecha en pesos contra lo esperado a hoy':'Sin objetivo cargado para este período','',desvioBadge,null,pctCumplHoy)+
+    // "/día" más chico: con montos de 8 cifras no entraba y la tarjeta mostraba "$ 11.683.330 …".
+    kpiCard('Ritmo necesario',ritmoNecesario!==null?`${money(ritmoNecesario)}<small class="kpi-unidad">/día</small>`:'—',restanteMes!==null?`${diasRestantes} día${diasRestantes===1?'':'s'} restantes para cubrir ${money(restanteMes)}`:`${diasRestantes} día${diasRestantes===1?'':'s'} restantes del mes`,'',ritmoTrend,null);
 
   // Aislado con try/catch por tarjeta: un error en una de estas (como el ReferenceError de
   // monthRows que colgó Lectura Rápida + las dos de Salud en "Sin datos" hasta que se detectó)
@@ -2336,35 +2344,26 @@ function monthTargetTotal(){return monthContext().monthTarget}
 // 4 filas apiladas a todo el ancho (ver CSS #deviationCard/.resumen-row), cada una flex:1 salvo el
 // banner final, para llenar la altura completa del panel sin huecos.
 function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
-  // `baseLocales` solo lo recibe la fila de Online: cuánto pesa el canal sobre la venta de los
-  // locales. Va acá y no en una tarjeta propia porque es la relación entre las dos filas que este
-  // panel ya muestra una debajo de la otra.
-  //
-  // Y va arriba, a la derecha del kicker, NO pegado al texto de abajo: .deviation-copy tiene
-  // max-width:220px y la fila alto fijo (flex:1), así que sumarle texto ahí lo mandaba a dos líneas
-  // y la segunda se comía el número de la fila. La línea del kicker, en cambio, está vacía.
-  const channelRow=(label,a,baseLocales)=>{
+  // Montos cortos con coma decimal ($64,9M): moneyShort usa punto, que en este panel se leía como miles.
+  const corto=v=>`$${new Intl.NumberFormat('es-AR',{maximumFractionDigits:1}).format(v/1e6)}M`;
+  const channelRow=(label,a)=>{
     const hasTarget=a.target>0,ratio=hasTarget?a.actual/a.target:0;
     const tone=hasTarget?statusTone(ratio):'';
-    const detalle=hasTarget?`${percent(ratio*100)} de su objetivo (${moneyShort(a.target)})`:'Sin objetivo cargado';
-    const peso=baseLocales>0?`<span class="resumen-share">${percent(a.actual/baseLocales*100)} de la venta de locales</span>`:'';
-    return `<div class="resumen-row"><div class="resumen-row-head"><span class="section-kicker">${label}</span>${peso}</div><div class="deviation-number ${tone}">${money(a.actual)}</div><div class="deviation-copy">${detalle}</div></div>`;
+    const detalle=hasTarget?`${percent(ratio*100)} de su objetivo (${corto(a.target)})`:'Sin objetivo cargado';
+    return `<div class="resumen-row"><div class="resumen-row-head"><span class="section-kicker">${label}</span></div><div class="deviation-number ${tone}">${money(a.actual)}</div><div class="deviation-copy">${detalle}</div></div>`;
   };
   const rowLocales=channelRow('LOCALES',aLocalCh);
-  const rowOnline=channelRow('ONLINE',aEcomCh,aLocalCh.actual);
+  const rowOnline=channelRow('ONLINE',aEcomCh);
 
-  // Canal a empujar: el que tenga mayor brecha de puntos vs. su propio objetivo (no en $, para poder
-  // comparar dos objetivos de tamaño distinto). Si a alguno le falta objetivo cargado, no hay foco
-  // posible a mostrar todavía.
-  const localHasT=aLocalCh.target>0,ecomHasT=aEcomCh.target>0;
-  let focoText='Cargá el objetivo de ambos canales para ver cuál necesita empuje.';
-  if(localHasT&&ecomHasT){
-    const localGap=(aLocalCh.actual-aLocalCh.target)/aLocalCh.target*100,ecomGap=(aEcomCh.actual-aEcomCh.target)/aEcomCh.target*100;
-    focoText=localGap<=ecomGap
-      ?`Locales necesita más empuje (${localGap>=0?'+':''}${localGap.toFixed(1)} pts vs. Online ${ecomGap>=0?'+':''}${ecomGap.toFixed(1)} pts)`
-      :`Online necesita más empuje (${ecomGap>=0?'+':''}${ecomGap.toFixed(1)} pts vs. Locales ${localGap>=0?'+':''}${localGap.toFixed(1)} pts)`;
-  }
-  const rowFoco=`<div class="resumen-row"><span class="section-kicker">CANAL A EMPUJAR</span><div class="resumen-banner-text">${focoText}</div></div>`;
+  // Peso del online: cuánto representa su venta sobre la de los locales. Reemplaza a "Canal a empujar"
+  // (pedido 2026-10-07), que decía con palabras lo que las dos filas de arriba ya muestran en colores.
+  // Al lado, cuánto pesaba en el OBJETIVO (objetivo online ÷ objetivo locales): el % de arriba se lee
+  // contra eso, y el color sale del semáforo general comparando los dos (0,7% contra 2,5% planeado
+  // es un 28% de lo esperado → rojo).
+  const peso=aLocalCh.actual>0?aEcomCh.actual/aLocalCh.actual:null;
+  const pesoPlan=aLocalCh.target>0&&aEcomCh.target>0?aEcomCh.target/aLocalCh.target:null;
+  const tonoPeso=peso!==null&&pesoPlan?statusTone(peso/pesoPlan):'';
+  const rowPeso=`<div class="resumen-row"><div class="resumen-row-head"><span class="section-kicker">PESO DEL ONLINE</span>${pesoPlan?`<span class="resumen-share">planeado: ${percent(pesoPlan*100)}</span>`:''}</div><div class="deviation-number ${tonoPeso}">${peso!==null?percent(peso*100):'—'}</div><div class="deviation-copy">${peso!==null?'de la venta de los locales':'sin venta de locales en el período'}</div></div>`;
 
   const aceleracion=(avgDailyReal!==null&&ritmoNecesario!==null)?ritmoNecesario-avgDailyReal:null;
   const bannerTone=aceleracion===null?'':aceleracion>0?'bad':'good';
@@ -2375,7 +2374,7 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
       :`Ritmo actual ya cubre lo necesario (${money(Math.abs(aceleracion))}/día de margen)`;
   const rowBanner=`<div class="resumen-row resumen-row-banner ${bannerTone}"><span class="resumen-banner-text">${bannerText}</span></div>`;
 
-  $('deviationCard').innerHTML=rowLocales+rowOnline+rowFoco+rowBanner;
+  $('deviationCard').innerHTML=rowLocales+rowOnline+rowPeso+rowBanner;
 }
 function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;
   // Ponderados sobre todo el período, no promedio de los valores diarios (ver sumarPonderado).
