@@ -1500,12 +1500,23 @@ function renderEvolucionVenta(container,puntos,stats,notaEnCurso){
     if(cerrados.length>2)rotular(cerrados.reduce((a,b)=>b.v<a.v?b:a),'mín.');
   }
   rotular(datos[n-1],datos[n-1].enCurso?'en curso':'último');
+  // Desvío en % de cada punto contra su objetivo (pedido 2026-10-07): adentro del rótulo en los
+  // rotulados (pico / mín. / último) y como etiqueta chica arriba del punto en el resto. Color con
+  // el semáforo general (statusTone sobre el % de cumplimiento). Con más de 12 puntos, solo en los
+  // rotulados para que no se pisen.
+  const desvioDe=x=>x.obj?(x.v/x.obj-1)*100:null;
+  const desvioTxt=x=>{const d=desvioDe(x);return d===null?'':`<em class="${statusTone(x.v/x.obj)}">${d>=0?'+':'−'}${percent(Math.abs(d))}</em>`};
+  const callouts=Object.values(rotulos).map(({x,motivos})=>{
+    const cls=motivos.includes('pico')?' cm-callout-pico':motivos.includes('mín.')?' cm-callout-min':'';
+    return `<div class="cm-callout evo-callout${cls}" style="left:${posX(x.i)}%;top:${posY(x.v)}%"><span>${motivos.join(' · ')}</span>${money(x.v)}${desvioTxt(x)}</div>`;
+  }).join('');
+  const etiquetasDesvio=n>12?'':datos.filter(x=>!rotulos[x.i]&&x.obj).map(x=>`<div class="evo-desvio" style="left:${posX(x.i)}%;top:${posY(x.v)}%">${desvioTxt(x)}</div>`).join('');
   const puntosHtml=datos.filter(x=>n<=12||rotulos[x.i]||x.estado==='parcial').map(x=>`<div class="cm-punto${x.estado==='parcial'?' cm-punto-parcial':''}" style="left:${posX(x.i)}%;top:${posY(x.v)}%"></div>`).join('');
   const cada=Math.max(1,Math.ceil(n/10));
   const ejeY=ticks.map(t=>`<span style="top:${posY(t)}%">${moneyShort(t)}</span>`).join('');
   const ejeX=datos.map((x,i)=>(i%cada===0||i===n-1)?`<span style="left:${posX(i)}%">${escapeHtml(x.eje)}</span>`:'').join('');
   const defs='<defs><linearGradient id="cmGradEvolucion" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".28"></stop><stop offset="100%" stop-color="currentColor" stop-opacity="0"></stop></linearGradient></defs>';
-  const grafico=`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot" style="color:var(--coral)"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${defs}${grillaSvg(ticks,Y)}${refProm}${objetivo}${areas}${lineas}</svg>${refPromTxt}<div class="cm-guia" hidden></div>${puntosHtml}<div class="cm-punto cm-punto-hover" hidden></div>${calloutsHtml(rotulos,v=>money(v),posX,posY)}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
+  const grafico=`<div class="cm-chart"><div class="cm-yaxis">${ejeY}</div><div class="cm-plot" style="color:var(--coral)"><svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">${defs}${grillaSvg(ticks,Y)}${refProm}${objetivo}${areas}${lineas}</svg>${refPromTxt}<div class="cm-guia" hidden></div>${puntosHtml}<div class="cm-punto cm-punto-hover" hidden></div>${etiquetasDesvio}${callouts}<div class="chart-tooltip cm-tooltip" hidden></div></div><div class="cm-xaxis">${ejeX}</div></div>`;
   const pie=`<span class="cm-key"><i class="cm-key-linea" style="background:var(--coral)"></i>Venta</span><span class="cm-key"><i class="cm-key-objlinea"></i>Objetivo</span><span class="cm-key"><i class="cm-key-prom"></i>Promedio</span>${notaEnCurso?`<span class="cm-foot-raros">${notaEnCurso}</span>`:''}`;
   container.className='';
   container.innerHTML=moduloAnalisisHtml(stats,grafico,pie);
@@ -1513,7 +1524,7 @@ function renderEvolucionVenta(container,puntos,stats,notaEnCurso){
   engancharTooltipModulo(container,datos,x=>`<div class="chart-tooltip-date">${escapeHtml(x.etiqueta)}${x.enCurso?' · en curso':''}</div>`+
     tipFila('var(--coral)','Venta',money(x.v))+
     (x.obj?tipFila('',x.enCurso?'Objetivo a la fecha':'Objetivo',money(x.obj))+
-      tipFila('','Desvío',`<span class="${x.v>=x.obj?'good':'bad'}">${signo(x.v-x.obj)}</span>`)+
+      tipFila('','Desvío',`<span class="${statusTone(x.v/x.obj)}">${signo(x.v-x.obj)} (${x.v>=x.obj?'+':'−'}${percent(Math.abs((x.v/x.obj-1)*100))})</span>`)+
       tipFila('','Cumplimiento',`<span class="${statusTone(x.v/x.obj)}">${percent(x.v/x.obj*100)}</span>`)
       :tipFila('','Sin objetivo cargado')),
     x=>`${posY(x.v)}%`);
@@ -1526,10 +1537,12 @@ function statsEvolucionVenta(puntos,unidad){
   const mayor=cerrados.length?cerrados.reduce((a,b)=>b.v>a.v?b:a):null,menor=cerrados.length>1?cerrados.reduce((a,b)=>b.v<a.v?b:a):null;
   const enObjetivo=puntos.filter(p=>p.obj>0&&p.v>=p.obj).length;
   const cuantos=unidad==='día'?`${puntos.length} ${puntos.length===1?'día':'días'} · ${enObjetivo} en objetivo`:`${puntos.length} ${puntos.length===1?'semana':'semanas'}`;
-  const sub=p=>`${escapeHtml(p.etiqueta)} · <b class="${statusTone(p.v/p.obj)}">${percent(p.v/p.obj*100)}</b>`;
+  // Desvío en %, como en el gráfico y en "Vs. objetivo" del módulo de ticket: +47,3% = 47,3% arriba del objetivo.
+  const pctDesvio=(v,o)=>{const d=(v/o-1)*100;return`${d>=0?'+':'−'}${percent(Math.abs(d))}`};
+  const sub=p=>`${escapeHtml(p.etiqueta)} · <b class="${statusTone(p.v/p.obj)}">${pctDesvio(p.v,p.obj)}</b>`;
   return[
     {label:unidad==='día'?'Venta de la semana':'Venta del período',value:money(venta),sub:`${cuantos}${puntos.some(p=>p.enCurso)?' · con la semana en curso':''}`},
-    {label:'Vs. objetivo',value:obj?percent(venta/obj*100):'—',tone:obj?statusTone(venta/obj):'',sub:obj?`objetivo ${money(obj)} · <b class="${desvio>=0?'good':'bad'}">${desvio>=0?'+':'−'}${money(Math.abs(desvio))}</b>`:'sin objetivo cargado'},
+    {label:'Vs. objetivo',value:obj?pctDesvio(venta,obj):'—',tone:obj?statusTone(venta/obj):'',sub:obj?`objetivo ${money(obj)} · <b class="${desvio>=0?'good':'bad'}">${desvio>=0?'+':'−'}${money(Math.abs(desvio))}</b>`:'sin objetivo cargado'},
     {label:unidad==='día'?'Mejor día':'Mayor venta',value:mayor?money(mayor.v):'—',sub:mayor?sub(mayor):''},
     {label:unidad==='día'?'Peor día':'Menor venta',value:menor?money(menor.v):'—',sub:menor?sub(menor):''}
   ];

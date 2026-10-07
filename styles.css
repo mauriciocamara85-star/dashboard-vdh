@@ -1182,3 +1182,8 @@ html[data-theme="light"] .focus-group td strong{color:#1E3552}
   html.menu-oculto .main-content{width:100%;max-width:none}
 }
 @media(max-width:720px){.menu-toggle{display:none}}
+.evo-desvio{position:absolute;transform:translate(-50%,calc(-100% - 9px));padding:1px 6px;border-radius:4px;background:var(--card);border:1px solid var(--line);pointer-events:none;z-index:1;white-space:nowrap}
+.evo-desvio em,.evo-callout em{font:700 10.5px var(--display);font-style:normal}
+.evo-desvio em.good,.evo-callout em.good{color:var(--mint)}
+.evo-desvio em.warning,.evo-callout em.warning{color:var(--amber)}
+.evo-desvio em.bad,.evo-callout em.bad{color:var(--red)}
