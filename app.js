@@ -1284,7 +1284,7 @@ function vendorHistory(){
     if(f<=0)return;
     if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),weeks:[]};
     row.Local.split(' + ').forEach(l=>groups[key].locales.add(l));
-    groups[key].weeks.push({weekKey:wk,enCurso:f<1,ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
+    groups[key].weeks.push({weekKey:wk,enCurso:f<1,real:num(row,'Venta real'),obj,ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
   });
   return Object.values(groups).map(g=>{
     g.weeks.sort((a,b)=>weekKeyOrder(a.weekKey)-weekKeyOrder(b.weekKey));
@@ -1311,7 +1311,7 @@ function localHistory(){
   return Object.keys(groups).map(loc=>{
     const weeks=Object.keys(groups[loc]).sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b)).map(wk=>{
       const w=groups[loc][wk],f=avance(seller==='all'?loc:`${loc}|${seller}`,wk),obj=w.target*f;
-      return{weekKey:wk,f,enCurso:f<1,ratio:obj?w.actual/obj*100:null,tp:w.tpCount?w.tpSum/w.tpCount:0,conv:w.convCount?w.convSum/w.convCount:0,pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
+      return{weekKey:wk,f,enCurso:f<1,real:w.actual,obj,ratio:obj?w.actual/obj*100:null,tp:w.tpCount?w.tpSum/w.tpCount:0,conv:w.convCount?w.convSum/w.convCount:0,pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
     }).filter(w=>w.f>0);
     return{local:loc,weeks};
   });
@@ -1446,7 +1446,23 @@ function renderRankBadges(){
 
   $('badgesRecords').innerHTML=records.length?records.map(r=>{const meta=metricMeta[r.metric];return `<div class="badge-row"><span class="badge-icon">${icon(meta.icon)}</span><div class="badge-info"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.local)} · nuevo récord de ${meta.label}</span></div><span class="badge-value">${meta.fmt(r.value)}</span></div>`}).join(''):'<div class="empty-state">Todavía no hay récords personales — hace falta más de una semana cargada</div>';
 }
-// points: [{ratio, etiqueta (tooltip), corto (eje)}] — semanas o días; unidad: "última semana"/"último día".
+// Monto corto para las etiquetas del gráfico: $1,29M · $850K (coma decimal, como el resto).
+const montoEtiqueta=v=>{const a=Math.abs(v);return a>=1e6?`$${new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(a/1e6)}M`:a>=1e3?`$${Math.round(a/1e3)}K`:money(a)};
+// Objetivo, venta y desvío arriba de cada punto (pedido 2026-10-07). Van en HTML encima del SVG —
+// el SVG se estira a lo ancho (preserveAspectRatio="none") y un texto adentro saldría deformado.
+// Con más de 8 puntos (el semestre entero) se pisarían: ahí, y en el celular, aparecen al pasar
+// o tocar el punto.
+function evolutionEtiquetas(points,x,y,w,h){
+  const conDato=points.filter(p=>p.ratio!==null&&(p.obj||p.real));
+  if(!conDato.length)return '';
+  const ultimo=points.length-1;
+  return conDato.map(p=>{
+    const desvio=(p.real||0)-(p.obj||0),pos=p.i===0&&ultimo>0?' primero':p.i===ultimo&&ultimo>0?' ultimo':'';
+    return `<div class="evo-punto${pos}" style="left:${(x(p.i)/w*100).toFixed(2)}%;top:${(y(p.ratio)/h*100).toFixed(2)}%"><span class="evo-hit" tabindex="0" aria-label="${escapeHtml(p.etiqueta)}"></span><div class="evo-label"><strong>${montoEtiqueta(p.real||0)}</strong><span>obj. ${montoEtiqueta(p.obj||0)}${p.enCurso?' a la fecha':''}</span><em class="${desvio>=0?'positive':'negative'}">${desvio>=0?'+':'−'}${montoEtiqueta(desvio)}</em></div></div>`;
+  }).join('');
+}
+// points: [{ratio, real, obj, enCurso, etiqueta (tooltip), corto (eje)}] — semanas o días;
+// unidad: "última semana"/"último día".
 function evolutionChartSvg(puntos,unidad){
   const points=puntos.map((p,i)=>({...p,i}));
   const withRatio=points.filter(p=>p.ratio!==null);
@@ -1456,11 +1472,12 @@ function evolutionChartSvg(puntos,unidad){
   const x=i=>points.length>1?(i/(points.length-1))*w:w/2;
   const y=v=>h-(v/maxVal)*(h-6)-3;
   const path=withRatio.length>1?withRatio.map((p,idx)=>`${idx===0?'M':'L'}${x(p.i).toFixed(1)},${y(p.ratio).toFixed(1)}`).join(' '):'';
-  const dots=withRatio.map(p=>`<circle class="line-dot" cx="${x(p.i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="4"><title>${percent(p.ratio)} · ${escapeHtml(p.etiqueta)}</title></circle>`).join('');
+  const detalle=p=>p.obj||p.real?` — venta ${money(p.real||0)} · objetivo ${money(p.obj||0)} · desvío ${(p.real||0)>=(p.obj||0)?'+':'−'}${money(Math.abs((p.real||0)-(p.obj||0)))}`:'';
+  const dots=withRatio.map(p=>`<circle class="line-dot" cx="${x(p.i).toFixed(1)}" cy="${y(p.ratio).toFixed(1)}" r="4"><title>${percent(p.ratio)} · ${escapeHtml(p.etiqueta)}${detalle(p)}</title></circle>`).join('');
   const targetY=y(100).toFixed(1);
   const first=points[0],last=points[points.length-1];
   const lastRatioLabel=last.ratio!==null?`${percent(last.ratio)} ${unidad}`:`sin objetivo ${unidad==='último día'?'el último día':'la última semana'}`;
-  return `<div class="chart-legend"><span><i class="legend-swatch" style="background:#52657d"></i>Objetivo (100%)</span><span><i class="legend-swatch" style="background:#F97316"></i>% cumplimiento</span></div><svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" stroke="#52657d" stroke-dasharray="6 5" stroke-width="2"></line>${path?`<path class="line-actual" d="${path}"></path>`:''}${dots}</svg><div class="line-axis"><span>${escapeHtml(first.corto)}</span><span>${lastRatioLabel}</span><span>${escapeHtml(last.corto)}</span></div>`;
+  return `<div class="chart-legend"><span><i class="legend-swatch" style="background:#52657d"></i>Objetivo (100%)</span><span><i class="legend-swatch" style="background:#F97316"></i>% cumplimiento</span></div><div class="evo-plot${points.length>8?' solo-hover':''}"><svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="0" y1="${targetY}" x2="${w}" y2="${targetY}" stroke="#52657d" stroke-dasharray="6 5" stroke-width="2"></line>${path?`<path class="line-actual" d="${path}"></path>`:''}${dots}</svg>${evolutionEtiquetas(points,x,y,w,h)}</div><div class="line-axis"><span>${escapeHtml(first.corto)}</span><span>${lastRatioLabel}</span><span>${escapeHtml(last.corto)}</span></div>`;
 }
 function showEvolutionEmpty(badgeText,message){
   $('rankingPeriodBadge').textContent=badgeText;
@@ -1542,7 +1559,7 @@ function renderEvolutionWeeks(weeks,todas,heading,quien,mes){
     (best?metricsCard('Mejor semana',percent(best.ratio),best.weekKey.replace('|',' · Semana '),best.ratio>=100?'good':''):metricsCard('Mejor semana','—',hayEnCurso?'la semana todavía está en curso':''))+
     metricsCard('Mejora promedio',avgMejora!==null?`${avgMejora>=0?'+':''}${avgMejora.toFixed(1)} pts`:'—',avgMejora!==null?(hayEnCurso?'entre semanas cerradas':'entre semanas consecutivas'):(hayEnCurso&&!visiblesCerradas.length?'la semana todavía está en curso':'esperando 2ª semana'),avgMejora!==null?(avgMejora>=0?'good':'bad'):'');
 
-  $('evolutionChart').innerHTML=evolutionChartSvg(weeks.map(w=>{const [m,n]=w.weekKey.split('|');return{ratio:w.ratio,etiqueta:`Semana ${n} de ${m}${w.enCurso?' (en curso)':''}`,corto:`S${n} ${m}`}}),'última semana');
+  $('evolutionChart').innerHTML=evolutionChartSvg(weeks.map(w=>{const [m,n]=w.weekKey.split('|');return{ratio:w.ratio,real:w.real,obj:w.obj,enCurso:w.enCurso,etiqueta:`Semana ${n} de ${m}${w.enCurso?' (en curso)':''}`,corto:`S${n} ${m}`}}),'última semana');
 
   const rows=weeks.map(w=>{
     const mejora=mejoraDe(w);
@@ -1587,7 +1604,7 @@ function renderEvolutionDias(dias,weeks,semana,heading){
     (best?metricsCard('Mejor día',percent(best.ratio),`${escapeHtml(best.dia)} ${formatDateShortAR(best.fecha)}`,statusTone(best.ratio/100)):metricsCard('Mejor día','—',''))+
     metricsCard('Días en objetivo',`${enObjetivo} de ${conObjetivo.length}`,'días con 100% o más',conObjetivo.length&&enObjetivo===conObjetivo.length?'good':'');
 
-  $('evolutionChart').innerHTML=evolutionChartSvg(dias.map(d=>({ratio:d.ratio,etiqueta:`${d.dia} ${formatDateShortAR(d.fecha)}`,corto:`${diaCortoDe(d.fecha)} ${formatDateShortAR(d.fecha)}`})),'último día');
+  $('evolutionChart').innerHTML=evolutionChartSvg(dias.map(d=>({ratio:d.ratio,real:d.venta,obj:d.objetivo,etiqueta:`${d.dia} ${formatDateShortAR(d.fecha)}`,corto:`${diaCortoDe(d.fecha)} ${formatDateShortAR(d.fecha)}`})),'último día');
 
   const rows=dias.map(d=>{
     const desvio=d.venta-d.objetivo;
@@ -1605,7 +1622,7 @@ function renderEvolutionDias(dias,weeks,semana,heading){
   ].filter(m=>w&&w[m.key]);
   $('evolutionBadges').innerHTML=indicadores.length?indicadores.map(m=>{
     const antes=prev&&prev[m.key]?prev[m.key]:null;
-    const sub=antes?`<span class="${w[m.key]>=antes?'positive':'negative'}">${w[m.key]>=antes?'▲':'▼'}</span> vs. ${m.fmt(antes)} la semana anterior`:'sin semana anterior para comparar';
+    const sub=antes?`<span class="${w[m.key]>=antes?'positive':'negative'}">${w[m.key]>=antes?'▲':'▼'}</span> vs. ${m.fmt(antes)} la semana anterior`:prev?'sin dato la semana anterior':'sin semana anterior para comparar';
     return `<div class="badge-row"><span class="badge-icon">${icon(m.icon)}</span><div class="badge-info"><strong>${m.label}</strong><span>${sub}</span></div><span class="badge-value">${m.fmt(w[m.key])}</span></div>`;
   }).join(''):'<div class="empty-state">Sin ticket, conversión ni PxT cargados esta semana</div>';
 }

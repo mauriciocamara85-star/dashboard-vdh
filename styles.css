@@ -1171,3 +1171,18 @@ tr.gp-detail>td{background:var(--ink);padding:10px 16px 14px}
 html[data-theme="light"] .focus-group td strong{color:#1E3552}
 #sellerFocusTable td.good,#storeFocusTable td.good{color:var(--mint);font-weight:700}
 #sellerFocusTable td.bad,#storeFocusTable td.bad{color:var(--red);font-weight:700}
+/* Evolución: objetivo, venta y desvío arriba de cada punto */
+.evo-plot{position:relative;margin-top:62px}
+.evo-punto{position:absolute;width:0;height:0}
+.evo-hit{position:absolute;left:-13px;top:-13px;width:26px;height:26px;border-radius:50%;cursor:pointer;outline:none}
+.evo-label{position:absolute;bottom:11px;left:0;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:1px;white-space:nowrap;padding:4px 8px;border-radius:8px;background:rgba(15,23,42,.86);border:1px solid var(--line);font-size:10px;line-height:1.3;pointer-events:none;z-index:1}
+.evo-punto.primero .evo-label{transform:none;left:-6px;align-items:flex-start}
+.evo-punto.ultimo .evo-label{transform:translateX(-100%);left:6px;align-items:flex-end}
+.evo-label strong{font:700 12px var(--display);color:var(--white)}
+.evo-label span{color:var(--muted)}
+.evo-label em{font-style:normal;font-weight:700}
+.evo-plot.solo-hover .evo-label{display:none}
+.evo-punto:hover .evo-label,.evo-punto:focus-within .evo-label{display:flex;z-index:3}
+html[data-theme="light"] .evo-label{background:rgba(255,255,255,.94);border-color:#C8D4E3}
+html[data-theme="light"] .evo-label strong{color:#0F1F33}
+@media(max-width:700px){.evo-plot .evo-label{display:none}.evo-plot{margin-top:18px}.evo-punto:hover .evo-label,.evo-punto:focus-within .evo-label{display:flex}}
