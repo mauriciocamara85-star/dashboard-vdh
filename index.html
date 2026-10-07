@@ -113,8 +113,8 @@
         </div>
         <article class="panel panel-large panel-standalone"><div class="panel-head"><div><span class="section-kicker">DÍA A DÍA</span><h2>Venta real vs. objetivo del día</h2></div><span class="panel-note">qué días específicos fallaron</span></div><div id="dailyComparisonChart" class="bar-chart bar-chart-compact empty-state">Conectá la fuente para ver el detalle diario.</div></article>
         <div class="split-grid lower-grid">
-          <article class="panel"><div class="panel-head"><div><span class="section-kicker">LOCALES</span><h2>Salud de los locales</h2></div><button class="text-button jump-view" data-view="stores">Ver detalle →</button></div><div id="storeHealth" class="team-health empty-state">Sin datos</div></article>
-          <article class="panel"><div class="panel-head"><div><span class="section-kicker">EQUIPO</span><h2>Salud del equipo de venta</h2></div><button class="text-button jump-view" data-view="sellerMetrics">Ver detalle →</button></div><div id="teamHealth" class="team-health empty-state">Sin datos</div></article>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">LOCALES</span><h2>Salud de los locales</h2></div><button class="text-button" type="button" data-salud="locales">Ver detalle →</button></div><div id="storeHealth" class="team-health empty-state">Sin datos</div></article>
+          <article class="panel"><div class="panel-head"><div><span class="section-kicker">EQUIPO</span><h2>Salud del equipo de venta</h2></div><button class="text-button" type="button" data-salud="equipo">Ver detalle →</button></div><div id="teamHealth" class="team-health empty-state">Sin datos</div></article>
         </div>
       </section>
 
@@ -184,7 +184,8 @@
           </div>
           <article class="panel"><div class="panel-head"><div><span class="section-kicker">COMO EN LA PLANILLA</span><h2>Ventas, gastos, CMV y rentabilidad</h2></div><span id="rentabilidadRowsCount" class="panel-note"></span></div><div class="table-wrap rent-table-wrap"><table id="rentabilidadTable" class="rent-table"></table></div><p class="rent-foot" id="rentFoot"></p></article>
         </section>
-      <footer class="app-footer">VDH / datos consolidados desde Google Sheets <span id="footerUpdated"></span></footer>
+      <div class="salud-modal" id="saludModal" hidden role="dialog" aria-modal="true" aria-labelledby="saludModalTitle"><div class="salud-modal-fondo" data-cerrar></div><div class="salud-modal-caja"><div class="salud-modal-head"><div><span class="section-kicker" id="saludModalKicker"></span><h2 id="saludModalTitle"></h2><p id="saludModalSub"></p></div><button type="button" class="salud-modal-cerrar" data-cerrar aria-label="Cerrar">✕</button></div><div class="salud-modal-filtros" id="saludModalFiltros"></div><div class="salud-modal-cuerpo"><table class="salud-tabla" id="saludModalTabla"></table></div><p class="salud-modal-nota" id="saludModalNota"></p></div></div>
+        <footer class="app-footer">VDH / datos consolidados desde Google Sheets <span id="footerUpdated"></span></footer>
     </main>
   </div>
   <!-- ── NAVEGACIÓN MÓVIL ESTILO TIENDANUBE (< 768px) ─────────────

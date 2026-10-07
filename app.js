@@ -1964,15 +1964,127 @@ function renderOverview(){
   safeRender(renderStoreHealth,localRows);
   safeRender(renderTeamHealth);
 }
-function renderStoreHealth(localRows){const container=$('storeHealth');const groups={};localRows.forEach(row=>{const key=row.Local||'Sin local';if(!groups[key])groups[key]={local:key,actual:0,target:0};groups[key].actual+=num(row,'Venta real');groups[key].target+=num(row,'Objetivo')});const list=Object.values(groups).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=UMBRAL_VERDE?'ok':x.ratio>=UMBRAL_AMARILLO?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<UMBRAL_AMARILLO).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.local)}</span><span class="health-local">${percent(x.ratio*100)} del objetivo</span><span class="health-ratio negative">${money(x.actual-x.target)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Todos los locales en objetivo</div>`}`}
-function renderTeamHealth(){const container=$('teamHealth');
-  // Fundida por vendedor compartido y por nombre solo: alguien que cubre 2 locales quedaba con DOS
-  // entradas de "salud del equipo" (una por local, cada una con la mitad de su venta y objetivo),
-  // pudiendo aparecer "en rojo" en las dos aunque su total combinado estuviera bien — bug real,
-  // auditoría 2026-09-05.
-  const rows=fusionarVendedoresCompartidos(state.tables.VENDEDOR_SEMANAL||[]);
-  const latest={};
-  rows.forEach(row=>{const key=row.Vendedor,semana=Number(row.Semana)||0;if(!latest[key]||semana>=latest[key].semana)latest[key]={semana,local:row.Local,name:row.Vendedor,actual:num(row,'Venta real'),target:num(row,'Venta obj')}});const list=Object.values(latest).map(x=>({...x,ratio:x.target?x.actual/x.target:0}));if(!list.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}container.classList.remove('empty-state');const buckets={ok:0,warn:0,danger:0};list.forEach(x=>buckets[x.ratio>=UMBRAL_VERDE?'ok':x.ratio>=UMBRAL_AMARILLO?'warn':'danger']++);const atRisk=list.filter(x=>x.ratio<UMBRAL_AMARILLO).sort((a,b)=>a.ratio-b.ratio).slice(0,5);container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${buckets.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${buckets.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${buckets.danger}</strong><span>en rojo</span></div></div>${atRisk.length?`<div class="health-list">${atRisk.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.name)}</span><span class="health-local">${escapeHtml(x.local)}</span><span class="health-ratio negative">${percent(x.ratio*100)}</span></div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}Nadie en rojo esta semana</div>`}`}
+// ── SALUD DE LOCALES Y DEL EQUIPO (Resumen general) + pantalla completa de "Ver detalle" ──────────
+// Los dos paneles miden lo mismo: cumplimiento A LA FECHA del período elegido arriba (venta real ÷
+// objetivo hasta el último día cargado, ver objectiveCutoff), con el semáforo general (statusTone).
+//
+// El del EQUIPO antes tomaba "la última semana" de cada vendedor de VENDEDOR_SEMANAL comparando
+// solo el número de semana, sin el mes: la semana 5 de septiembre le ganaba a la 2 de octubre, y casi
+// todos aparecían con septiembre S5 (3 días con feriado) → 35 en rojo, la mayoría con 0,0% (reportado
+// 2026-10-07). Ahora sale de VENDEDOR_DIARIO, igual que el de locales: los días del período, por
+// NOMBRE (quien cubre dos locales suma los dos). Quien no tiene objetivo cargado no se puede
+// clasificar: se cuenta aparte en vez de caer en rojo con 0/0.
+function saludLocalesLista(localRows){
+  const g={};
+  localRows.forEach(row=>{const k=row.Local||'Sin local';const e=g[k]||(g[k]={nombre:k,actual:0,target:0});e.actual+=num(row,'Venta real');e.target+=num(row,'Objetivo')});
+  return Object.values(g).map(e=>({...e,ratio:e.target?e.actual/e.target:null}));
+}
+function saludEquipoLista(){
+  const rows=rowsThroughToday(overviewRows('VENDEDOR_DIARIO'));
+  const fechas=new Set(rows.map(r=>String(r.Fecha??'').slice(0,10)).filter(Boolean));
+  const g={};
+  rows.forEach(row=>{
+    const k=row.Vendedor;if(!k)return;
+    const e=g[k]||(g[k]={nombre:k,actual:0,target:0,locales:new Set(),dias:new Set()});
+    const v=num(row,'Venta real');
+    e.actual+=v;e.target+=num(row,'Objetivo del día');e.locales.add(row.Local||'');
+    if(v>0)e.dias.add(String(row.Fecha).slice(0,10));
+  });
+  return Object.values(g).map(e=>({...e,local:[...e.locales].filter(Boolean).map(l=>titleCaseLocal(l)).sort().join(' + '),
+    diasConVenta:e.dias.size,diasPeriodo:fechas.size,ratio:e.target?e.actual/e.target:null}));
+}
+const titleCaseLocal=t=>String(t??'').toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
+function saludCuentas(lista){
+  const c={ok:0,warn:0,danger:0,sinObj:0};
+  lista.forEach(x=>{if(x.ratio===null)c.sinObj++;else c[x.ratio>=UMBRAL_VERDE?'ok':x.ratio>=UMBRAL_AMARILLO?'warn':'danger']++});
+  return c;
+}
+// El panel chico: los 3 contadores y los 5 más abajo (los en rojo, de menor a mayor).
+function saludPanel(container,lista,{filaDerecha,vacio,sinObjTexto}){
+  if(!lista.length){container.classList.add('empty-state');container.innerHTML='Sin datos';return}
+  container.classList.remove('empty-state');
+  const c=saludCuentas(lista);
+  const enRojo=lista.filter(x=>x.ratio!==null&&x.ratio<UMBRAL_AMARILLO).sort((a,b)=>a.ratio-b.ratio).slice(0,5);
+  container.innerHTML=`<div class="health-summary"><div class="health-chip ok"><strong>${c.ok}</strong><span>en objetivo</span></div><div class="health-chip warn"><strong>${c.warn}</strong><span>alerta</span></div><div class="health-chip danger"><strong>${c.danger}</strong><span>en rojo</span></div></div>`+
+    (enRojo.length?`<div class="health-list">${enRojo.map(x=>`<div class="health-row"><span class="dot danger"></span><span class="health-name">${escapeHtml(x.nombre)}</span>${filaDerecha(x)}</div>`).join('')}</div>`:`<div class="health-empty">${icon('sparkles','health-empty-icon')}${vacio}</div>`)+
+    (c.sinObj?`<div class="health-nota">${c.sinObj} ${sinObjTexto}</div>`:'');
+}
+function renderStoreHealth(localRows){
+  const lista=saludLocalesLista(localRows);
+  state.saludDatos={...(state.saludDatos||{}),locales:lista};
+  saludPanel($('storeHealth'),lista,{vacio:'Ningún local en rojo',sinObjTexto:'local(es) sin objetivo cargado en el período',
+    filaDerecha:x=>`<span class="health-local">${percent(x.ratio*100)} del objetivo</span><span class="health-ratio negative">${money(x.actual-x.target)}</span>`});
+  saludModalRefrescar('locales');
+}
+function renderTeamHealth(){
+  const lista=saludEquipoLista();
+  state.saludDatos={...(state.saludDatos||{}),equipo:lista};
+  saludPanel($('teamHealth'),lista,{vacio:'Nadie en rojo en el período',sinObjTexto:'vendedor(es) sin objetivo cargado: no se los puede clasificar',
+    filaDerecha:x=>`<span class="health-local">${escapeHtml(x.local)}</span><span class="health-ratio negative">${percent(x.ratio*100)}</span>`});
+  saludModalRefrescar('equipo');
+}
+
+// ── Pantalla completa de "Ver detalle" ──
+// Todos los locales o todos los vendedores, de MENOR a MAYOR cumplimiento, con filtros por estado.
+// Se cierra con ✕, con Esc o tocando afuera. Si los datos se refrescan con la pantalla abierta, se
+// redibuja sola (saludModalRefrescar).
+function saludModalAbrir(tipo){
+  state.saludModal={tipo,filtro:'todos'};
+  $('saludModal').hidden=false;
+  document.body.classList.add('modal-abierto');
+  saludModalDibujar();
+}
+function saludModalCerrar(){
+  if(!state.saludModal)return;
+  state.saludModal=null;
+  $('saludModal').hidden=true;
+  document.body.classList.remove('modal-abierto');
+}
+function saludModalRefrescar(tipo){if(state.saludModal&&state.saludModal.tipo===tipo)saludModalDibujar()}
+function saludModalDibujar(){
+  const{tipo,filtro}=state.saludModal;
+  const esEquipo=tipo==='equipo';
+  const lista=(state.saludDatos&&state.saludDatos[tipo])||[];
+  const c=saludCuentas(lista);
+  const desde=$('fromDate').value,hasta=objectiveCutoff();
+  $('saludModalKicker').textContent=esEquipo?'EQUIPO':'LOCALES';
+  $('saludModalTitle').textContent=esEquipo?'Salud del equipo de venta':'Salud de los locales';
+  $('saludModalSub').textContent=`Cumplimiento a la fecha${desde?` · ${formatDateShortAR(desde)} → ${formatDateShortAR(hasta)}`:` · hasta el ${formatDateShortAR(hasta)}`} · de menor a mayor`;
+  const filtros=[['todos','Todos',lista.length,''],['danger','En rojo',c.danger,'danger'],['warn','Alerta',c.warn,'warn'],['ok','En objetivo',c.ok,'ok']];
+  if(c.sinObj)filtros.push(['sinObj','Sin objetivo',c.sinObj,'']);
+  $('saludModalFiltros').innerHTML=filtros.map(([k,t,n,cls])=>`<button type="button" class="salud-filtro ${cls}${filtro===k?' active':''}" data-filtro="${k}"><strong>${n}</strong>${t}</button>`).join('');
+  const estado=x=>x.ratio===null?'sinObj':x.ratio>=UMBRAL_VERDE?'ok':x.ratio>=UMBRAL_AMARILLO?'warn':'danger';
+  const visibles=lista.filter(x=>filtro==='todos'||estado(x)===filtro)
+    .sort((a,b)=>(a.ratio===null)-(b.ratio===null)||(a.ratio??0)-(b.ratio??0)||String(a.nombre).localeCompare(String(b.nombre),'es'));
+  const barra=x=>{
+    if(x.ratio===null)return'<span class="missing-value">sin objetivo</span>';
+    const tono=statusTone(x.ratio),ancho=Math.min(x.ratio,1.2)/1.2*100;
+    return`<div class="salud-cumpl"><div class="salud-barra"><i class="${tono}" style="width:${ancho.toFixed(1)}%"></i><span class="salud-meta"></span></div><strong class="${tono}">${percent(x.ratio*100)}</strong></div>`;
+  };
+  const cab=esEquipo
+    ?'<th class="align-right">#</th><th>Vendedor</th><th>Local</th><th class="align-right">Días con venta</th><th class="align-right">Objetivo a la fecha</th><th class="align-right">Venta real</th><th class="align-right">Desvío</th><th>Cumplimiento</th>'
+    :'<th class="align-right">#</th><th>Local</th><th class="align-right">Objetivo a la fecha</th><th class="align-right">Venta real</th><th class="align-right">Desvío</th><th>Cumplimiento</th>';
+  const filas=visibles.map((x,i)=>{
+    const desvio=x.target?x.actual-x.target:null,tono=x.ratio===null?'':cumplClase(x.ratio);
+    const comun=`<td class="num">${money(x.target)}</td><td class="num">${money(x.actual)}</td><td class="num ${tono}">${desvio===null?'—':`${desvio>=0?'+':''}${money(desvio)}`}</td><td>${barra(x)}</td>`;
+    return esEquipo
+      ?`<tr><td class="num salud-pos">${i+1}</td><td class="seller-name">${escapeHtml(x.nombre)}</td><td class="seller-location">${escapeHtml(x.local)}</td><td class="num">${x.diasConVenta} de ${x.diasPeriodo}</td>${comun}</tr>`
+      :`<tr><td class="num salud-pos">${i+1}</td><td class="seller-name">${escapeHtml(titleCaseLocal(x.nombre))}</td>${comun}</tr>`;
+  }).join('');
+  $('saludModalTabla').innerHTML=`<thead><tr>${cab}</tr></thead><tbody>${filas||`<tr><td colspan="${esEquipo?8:6}" class="empty-state">Nadie en este estado</td></tr>`}</tbody>`;
+  $('saludModalNota').textContent=esEquipo
+    ?'El objetivo de cada vendedor se le imputa todos los días del período, trabaje o no (la planilla no trae francos): quien tiene pocos días con venta aparece más abajo de lo que vendió en los días que estuvo. Por eso la columna "Días con venta".'
+    :'Cumplimiento = venta real ÷ objetivo, hasta el último día cargado. Verde 100% o más · amarillo 85% a 99% · rojo menos de 85%.';
+}
+function engancharSaludModal(){
+  qa('[data-salud]').forEach(btn=>btn.addEventListener('click',()=>saludModalAbrir(btn.dataset.salud)));
+  $('saludModal').addEventListener('click',e=>{
+    if(e.target.closest&&e.target.closest('[data-cerrar]'))return saludModalCerrar();
+    const f=e.target.closest&&e.target.closest('[data-filtro]');
+    if(f&&state.saludModal){state.saludModal.filtro=f.dataset.filtro;saludModalDibujar()}
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')saludModalCerrar()});
+}
 function renderBars(rows,monthCtx){
   const container=$('salesBars');
   const byDate={};
@@ -3772,6 +3884,7 @@ qa('.drawer-item[data-drawer-view]').forEach(btn=>btn.addEventListener('click',(
 initPeriodPicker();
 applyPeriodPreset(PERIODO_POR_DEFECTO,false);
 // Cambiar de mes vuelve a la última fecha de ese mes.
+engancharSaludModal();   // "Ver detalle" de Salud de locales y del equipo
 $('rankMonthSelect').addEventListener('change',e=>{state.rankMonth=e.target.value;state.rankWeek=null;renderRanking()});
 $('rankWeekSelect').addEventListener('change',e=>{state.rankWeek=e.target.value;renderRanking()});
 scheduleRefresh();loadData();

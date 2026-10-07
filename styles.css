@@ -800,6 +800,40 @@ tr.breakdown-total td{border-top:2px solid var(--line);font-weight:700;backgroun
 .health-local{color:var(--muted);font-size:11px}
 .health-ratio{font-family:var(--display);font-weight:700}
 .health-empty{color:var(--muted);font-size:12px;text-align:center;padding:10px 0}
+.health-nota{font-size:11px;color:var(--muted);text-align:center}
+
+/* ── "Ver detalle" de Salud de locales / del equipo: pantalla completa (ver saludModalDibujar) ── */
+body.modal-abierto{overflow:hidden}
+.salud-modal{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;padding:32px}
+.salud-modal[hidden]{display:none}
+.salud-modal-fondo{position:absolute;inset:0;background:rgba(5,10,20,.72);backdrop-filter:blur(3px)}
+.salud-modal-caja{position:relative;display:flex;flex-direction:column;width:min(1240px,100%);max-height:100%;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 30px 80px rgba(0,0,0,.55);overflow:hidden}
+.salud-modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:24px 28px 14px}
+.salud-modal-head h2{margin:6px 0 4px;font:600 24px var(--display);color:var(--white)}
+.salud-modal-head p{margin:0;font-size:12.5px;color:var(--muted)}
+.salud-modal-cerrar{flex:none;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--ink);color:var(--soft);font-size:16px;cursor:pointer}
+.salud-modal-cerrar:hover{color:var(--white);border-color:var(--muted)}
+.salud-modal-filtros{display:flex;flex-wrap:wrap;gap:8px;padding:0 28px 16px}
+.salud-filtro{display:inline-flex;align-items:baseline;gap:7px;padding:8px 14px;border-radius:var(--radius-pill);border:1px solid var(--line);background:var(--ink);color:var(--soft);font:600 12px var(--sans);cursor:pointer}
+.salud-filtro strong{font:700 15px var(--display);color:var(--white)}
+.salud-filtro.ok strong{color:var(--mint)}.salud-filtro.warn strong{color:var(--amber)}.salud-filtro.danger strong{color:var(--red)}
+.salud-filtro.active{border-color:var(--coral);background:rgba(249,115,22,.12);color:var(--white)}
+.salud-modal-cuerpo{overflow:auto;border-top:1px solid var(--line)}
+.salud-tabla{width:100%;border-collapse:collapse;font-size:12.5px}
+.salud-tabla th{position:sticky;top:0;z-index:1;background:var(--sub);color:#D8E4F2;font-size:10px;letter-spacing:.5px;text-transform:uppercase;font-weight:700;padding:11px 14px;text-align:left;white-space:nowrap}
+.salud-tabla td{padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+.salud-tabla tbody tr:hover td{background:var(--row2)}
+.salud-pos{color:var(--muted)}
+.salud-cumpl{display:flex;align-items:center;gap:12px;min-width:220px}
+.salud-barra{position:relative;flex:1;height:8px;border-radius:4px;background:var(--ink);overflow:hidden}
+.salud-barra i{position:absolute;inset:0 auto 0 0;border-radius:4px}
+.salud-barra i.good{background:var(--mint)}.salud-barra i.warning{background:var(--amber)}.salud-barra i.bad{background:var(--red)}
+/* Marca del 100%: la barra llega hasta 120%, así que el objetivo cae al 83,3% del ancho. */
+.salud-meta{position:absolute;top:-2px;bottom:-2px;left:83.33%;width:2px;background:var(--white);opacity:.55}
+.salud-cumpl strong{min-width:58px;text-align:right;font:700 13px var(--display)}
+.salud-cumpl strong.good{color:var(--mint)}.salud-cumpl strong.warning{color:var(--amber)}.salud-cumpl strong.bad{color:var(--red)}
+.salud-modal-nota{margin:0;padding:12px 28px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);line-height:1.5}
+@media(max-width:700px){.salud-modal{padding:0}.salud-modal-caja{border-radius:0;height:100%}.salud-modal-head,.salud-modal-filtros{padding-left:16px;padding-right:16px}}
 .health-empty-icon{width:13px;height:13px;vertical-align:-2px;margin-right:5px}
 
 /* ── TRAFFIC LIGHTS ───────────────────────────────────────── */
