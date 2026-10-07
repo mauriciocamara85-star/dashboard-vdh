@@ -1,5 +1,5 @@
 const DATA_ENDPOINT='https://script.google.com/macros/s/AKfycbyuS6K8oq2KWJ6BMSayHXHHSf0v2jr70OoSD4UfwX77cD3OobN1OrzFsTTXC6JI9Yo/exec';
-const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta',comp:{modo:'none',desde:''}};
+const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta',comp:{modo:'none',desde:'',hasta:''}};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
 // de refresh) para reemplazar los emoji de navegación/medallero por vectores consistentes en el
@@ -2758,29 +2758,17 @@ function renderDeviation(aLocalCh,aEcomCh,avgDailyReal,ritmoNecesario){
   $('deviationCard').innerHTML=rowLocales+rowOnline+rowPeso+rowBanner;
 }
 // ── COMPARACIÓN (solo Locales, pedido 2026-10-07) ───────────────────────────────────────────────
-// Compara el período elegido arriba contra otro con la MISMA cantidad de días, que arranca en la
-// fecha que elija el usuario: libre, cualquier día cargado. "Semana anterior" y "Misma semana del
-// mes anterior" son atajos que completan esa fecha, siempre en el mismo día de la semana (un "mes
-// anterior" de calendario compararía el martes 6/10 con el domingo 6/9). Como en Tienda Nube, al comparar
-// cambian tres cosas: el % de variación abajo de cada tarjeta, una línea punteada con el período
-// comparado en los gráficos y, en el detalle de cada día, el valor del día equivalente.
-const COMP_ATAJOS={semana:7};
-// "Misma semana del mes anterior" (pedido 2026-10-07): la Semana N de la planilla en el mes anterior,
-// en el mismo día de la semana — Semana 2 de octubre contra Semana 2 de septiembre. No es siempre
-// "4 semanas atrás": las semanas de la planilla van de lunes a domingo y la 1 queda corta, así que la
-// Semana 2 de septiembre (07/09) está 5 semanas después de la de agosto (03/08). Si esa semana no
-// tiene ese día (una Semana 1 que arranca más tarde), cae en el mismo día 4 semanas antes.
+// Compara el período elegido arriba contra otro que el usuario elige LIBREMENTE en un calendario, de
+// tal fecha a tal fecha, sin atajos (así lo pidió: los atajos "Semana anterior" y "Misma semana del
+// mes anterior" se sacaron). Para que sea parejo conviene la misma cantidad de días empezando el mismo
+// día de la semana (de jueves a martes contra otro jueves a martes): el panel lo explica y avisa
+// cuando no se cumple, pero no lo impone. Como en Tienda Nube, al comparar cambian tres cosas: el % de
+// variación abajo de cada tarjeta, una línea punteada con el período comparado en los gráficos y, en
+// el detalle de cada día, el valor del día equivalente (los dos períodos se alinean desde su inicio).
+function diasEntre(a,b){return Math.round((new Date(`${b}T00:00:00`)-new Date(`${a}T00:00:00`))/86400000)}
 function semanaDeFecha(fecha){const f=(state.tables.LOCAL_DIARIO||[]).find(r=>normalizeDate(r.Fecha)===fecha);return f?{mes:String(f.Mes??'').trim(),semana:String(f.Semana??'').trim()}:null}
-function fechaMismaSemanaMesAnterior(fecha){
-  const w=semanaDeFecha(fecha);if(!w)return null;
-  const i=MESES_NOMBRE.indexOf(w.mes);if(i<0)return null;
-  const mesAnt=MESES_NOMBRE[(i+11)%12],dia=new Date(`${fecha}T00:00:00`).getDay();
-  const fechas=[...new Set((state.tables.LOCAL_DIARIO||[]).filter(r=>String(r.Mes??'').trim()===mesAnt&&String(r.Semana??'').trim()===w.semana).map(r=>normalizeDate(r.Fecha)).filter(Boolean))].sort();
-  return fechas.find(f=>new Date(`${f}T00:00:00`).getDay()===dia)||null;
-}
 // "Semana 2 de Octubre (05/10 → 06/10)" cuando el rango cae entero en una semana de la planilla.
 function etiquetaConSemana(r){const a=semanaDeFecha(r.desde),b=semanaDeFecha(r.hasta);return a&&b&&a.mes===b.mes&&a.semana===b.semana?`Semana ${a.semana} de ${a.mes} (${etiquetaRango(r)})`:etiquetaRango(r)}
-function diasEntre(a,b){return Math.round((new Date(`${b}T00:00:00`)-new Date(`${a}T00:00:00`))/86400000)}
 // Período que se está mirando en Locales: desde el "Desde" elegido (o el primer día con datos si no
 // hay filtro de fecha) hasta el último día cargado — el mismo corte de las tarjetas.
 function rangoPrincipalLocales(rows){
@@ -2791,11 +2779,9 @@ function rangoPrincipalLocales(rows){
   return{desde,hasta,dias:diasEntre(desde,hasta)+1};
 }
 function rangoComparacion(principal,comp=state.comp){
-  if(!principal||!comp||comp.modo==='none')return null;
-  const desde=comp.modo==='mesanterior'?(fechaMismaSemanaMesAnterior(principal.desde)||addDaysKey(principal.desde,-28))
-    :COMP_ATAJOS[comp.modo]?addDaysKey(principal.desde,-COMP_ATAJOS[comp.modo]):comp.desde;
-  if(!desde)return null;
-  return{desde,hasta:addDaysKey(desde,principal.dias-1),dias:principal.dias,corrimiento:diasEntre(desde,principal.desde)};
+  if(!principal||!comp||comp.modo==='none'||!comp.desde)return null;
+  const desde=comp.desde,hasta=comp.hasta&&comp.hasta>=comp.desde?comp.hasta:comp.desde;
+  return{desde,hasta,dias:diasEntre(desde,hasta)+1,diasPrincipal:principal.dias,corrimiento:diasEntre(desde,principal.desde),principalHasta:principal.hasta};
 }
 function etiquetaRango(r){return r.desde===r.hasta?`${diaCortoDe(r.desde)} ${formatDateShortAR(r.desde)}`:`${formatDateShortAR(r.desde)} → ${formatDateShortAR(r.hasta)}`}
 function primerDiaCargado(){const f=(state.tables.LOCAL_DIARIO||[]).filter(r=>num(r,'Venta real')>0).map(r=>normalizeDate(r.Fecha)).filter(Boolean).sort();return f[0]||''}
@@ -2812,9 +2798,10 @@ function datosComparacion(rows){
   rango.parcial=Boolean((primero&&rango.desde<primero)||(ultimo&&rango.hasta>ultimo));
   // Mismos locales-día que el período elegido: un día que todavía está a medio cargar (hoy, con 1 de
   // 14 locales) se compara solo contra esos locales en el día equivalente. Si no, un día entero del
-  // período comparado quedaba contra un pedacito y la variación salía de menos sin motivo.
+  // período comparado quedaba contra un pedacito y la variación salía de menos sin motivo. Los días
+  // del comparado que no tienen equivalente (si se eligió un período más largo) entran enteros.
   const cargados=new Set(rows.filter(r=>num(r,'Venta real')>0||num(r,'Tráfico real')>0).map(r=>`${normalizeDate(r.Fecha)}|${r.Local}`));
-  const filas=(state.tables.LOCAL_DIARIO||[]).filter(r=>{const f=normalizeDate(r.Fecha);return f&&f>=rango.desde&&f<=rango.hasta&&(!ultimo||f<=ultimo)&&(local==='all'||String(r.Local??'')===local)&&cargados.has(`${addDaysKey(f,rango.corrimiento)}|${r.Local}`)});
+  const filas=(state.tables.LOCAL_DIARIO||[]).filter(r=>{const f=normalizeDate(r.Fecha);return f&&f>=rango.desde&&f<=rango.hasta&&(!ultimo||f<=ultimo)&&(local==='all'||String(r.Local??'')===local)&&(addDaysKey(f,rango.corrimiento)>rango.principalHasta||cargados.has(`${addDaysKey(f,rango.corrimiento)}|${r.Local}`))});
   if(!filas.some(r=>num(r,'Venta real')>0))return{rango,vacio:true};
   const a=aggregate(filas);
   const p=cerrarPonderado(filas.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado()));
@@ -2822,10 +2809,11 @@ function datosComparacion(rows){
   const fechaDe=fecha=>addDaysKey(fecha,-rango.corrimiento);
   return{rango,a,conv:p.conversion,ticket:p.ticket,efectivo:promedioCargado(filas,'Efectivo'),daily,fechaDe,dia:fecha=>porFecha[fechaDe(fecha)]||null};
 }
-// "↑ 8,2% vs. 24/09 → 29/09". tipo 'pts' para las tasas (conversión, % de efectivo): la resta de
-// dos porcentajes son puntos, no un % relativo. neutro: subir o bajar no es bueno ni malo.
+// "↑ 8,2% vs. 24/09 → 29/09". tipo 'pts' para las tasas (conversión): la resta de dos porcentajes son
+// puntos, no un % relativo. neutro: subir o bajar no es bueno ni malo. Si el comparado tiene otra
+// cantidad de días, se dice al lado ("7 días"): la venta total no queda pareja.
 function variacionHtml(actual,anterior,{tipo='pct',neutro=false,rango}={}){
-  const ref=`<span class="comp-ref">vs. ${etiquetaRango(rango)}${rango.parcial?' (parcial)':''}</span>`;
+  const ref=`<span class="comp-ref">vs. ${etiquetaRango(rango)}${rango.dias!==rango.diasPrincipal?` (${rango.dias} días)`:''}${rango.parcial?' (parcial)':''}</span>`;
   if(anterior===null||anterior===undefined||!Number.isFinite(anterior)||(tipo==='pct'&&!anterior))return `<span class="comp-ref">sin dato para comparar en ${etiquetaRango(rango)}</span>`;
   const d=tipo==='pts'?actual-anterior:(actual/anterior-1)*100,igual=Math.abs(d)<0.05;
   const txt=tipo==='pts'?`${Math.abs(d).toFixed(1).replace('.',',')} pts`:percent(Math.abs(d));
@@ -2844,19 +2832,29 @@ function filaComparacion(comp,fecha,valor,fmt,tipo,actual){
   if(actual>0){const d=tipo==='pts'?actual-valor:(actual/valor-1)*100;delta=` <span class="${d>=0?'good':'bad'}">${d>=0?'+':'−'}${tipo==='pts'?`${Math.abs(d).toFixed(1).replace('.',',')} pts`:percent(Math.abs(d))}</span>`}
   return tipFila('var(--comp)',etiqueta,`${fmt(valor)}${delta}`);
 }
-// ── Selector "Comparar con" (mismo lenguaje que Período / Período seleccionado) ──
+// ── Selector "Comparar con" (mismo lenguaje que Período seleccionado: calendario de rango) ──
 const compUI={fp:null,borrador:null,sincronizando:false};
-function textoBotonComp(){const c=state.comp;if(c.modo==='semana')return'Semana anterior';if(c.modo==='mesanterior')return'Misma semana del mes anterior';if(c.modo==='fecha'&&c.desde)return`Desde ${formatDateShortAR(c.desde)}`;return'Sin comparar'}
-function refrescarPanelComp(){
+const DIA_LARGO=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+function textoBotonComp(){const c=state.comp;return c.modo==='fecha'&&c.desde?etiquetaRango({desde:c.desde,hasta:c.hasta&&c.hasta>=c.desde?c.hasta:c.desde}):'Sin comparar'}
+// sincronizar: marcar en el calendario lo que ya está elegido (solo al abrir; mientras el usuario
+// clickea no se toca, o el primer clic cerraría el rango en un solo día).
+function refrescarPanelComp(sincronizar=false){
   const b=compUI.borrador;
-  qa('.comp-atajo').forEach(btn=>btn.classList.toggle('active',btn.dataset.comp===b.modo));
   const principal=rangoPrincipalLocales(rowsThroughToday(activeRows('LOCAL_DIARIO'))),rango=rangoComparacion(principal,b);
   const cuantos=n=>`${n} día${n===1?'':'s'}`;
-  $('compRango').innerHTML=!principal?'Elegí arriba un período con días cargados.'
-    :!rango?`Período elegido: ${etiquetaRango(principal)} (${cuantos(principal.dias)}). Tocá un atajo o una fecha del calendario.`
-    :`Compara <b>${etiquetaConSemana(principal)}</b> con <b>${etiquetaConSemana(rango)}</b>: ${cuantos(rango.dias)}, los mismos que el período elegido.`;
-  $('compApplyBtn').disabled=b.modo!=='none'&&!rango;
-  if(compUI.fp){compUI.sincronizando=true;if(rango)compUI.fp.setDate(rango.desde,false);else compUI.fp.clear();compUI.sincronizando=false}
+  let texto,avisos=[];
+  if(!principal)texto='Elegí arriba un período con días cargados.';
+  else if(!rango)texto=`Período elegido: <b>${etiquetaConSemana(principal)}</b>, ${cuantos(principal.dias)}. Marcá en el calendario de qué fecha a qué fecha comparar.`;
+  else{
+    texto=`Compara <b>${etiquetaConSemana(principal)}</b> (${cuantos(principal.dias)}) con <b>${etiquetaConSemana(rango)}</b> (${cuantos(rango.dias)}).`;
+    const d1=new Date(`${principal.desde}T00:00:00`).getDay(),d2=new Date(`${rango.desde}T00:00:00`).getDay();
+    if(d1!==d2)avisos.push(`El período elegido arranca un ${DIA_LARGO[d1]} y el comparado un ${DIA_LARGO[d2]}: los días no quedan contra el mismo día de la semana.`);
+    if(rango.dias!==principal.dias)avisos.push(`Tienen distinta cantidad de días (${principal.dias} y ${rango.dias}): la venta y el tráfico totales no quedan parejos.`);
+  }
+  $('compRango').innerHTML=texto;
+  $('compAviso').innerHTML=avisos.join(' ');$('compAviso').hidden=!avisos.length;
+  $('compApplyBtn').disabled=!rango;
+  if(sincronizar&&compUI.fp){compUI.sincronizando=true;if(rango)compUI.fp.setDate([rango.desde,rango.hasta],false);else compUI.fp.clear();compUI.sincronizando=false}
 }
 function abrirPanelComp(){
   compUI.borrador={...state.comp};
@@ -2864,20 +2862,23 @@ function abrirPanelComp(){
   $('compDropdown').hidden=false;$('compBtn').setAttribute('aria-expanded','true');
   if(!compUI.fp&&window.flatpickr){
     if(flatpickr.l10ns&&flatpickr.l10ns.es)flatpickr.localize(flatpickr.l10ns.es);
-    compUI.fp=flatpickr($('compCalendar'),{inline:true,mode:'single',dateFormat:'Y-m-d',monthSelectorType:'static',
-      onChange:sel=>{if(compUI.sincronizando||!sel.length)return;compUI.borrador={modo:'fecha',desde:normalizeDate(sel[0])};refrescarPanelComp()}});
+    compUI.fp=flatpickr($('compCalendar'),{inline:true,mode:'range',dateFormat:'Y-m-d',monthSelectorType:'static',
+      // Primer clic: desde (sirve solo, para comparar un único día). Segundo clic: hasta.
+      onChange:sel=>{if(compUI.sincronizando||!sel.length)return;const desde=normalizeDate(sel[0]),hasta=sel[1]?normalizeDate(sel[1]):desde;compUI.borrador={modo:'fecha',desde,hasta};refrescarPanelComp()},
+      // Doble clic en un día = ese día solo, igual que en "Período seleccionado".
+      onDayCreate:(dObj,dStr,fp,dayElem)=>{dayElem.addEventListener('dblclick',()=>{if(dayElem.dateObj)fp.setDate([dayElem.dateObj,dayElem.dateObj],true)})}});
   }
   // Solo días con datos: antes del primero o después del último no hay con qué comparar.
   if(compUI.fp){const primero=primerDiaCargado(),ultimo=lastLoadedDate('LOCAL_DIARIO');if(primero)compUI.fp.set('minDate',primero);if(ultimo)compUI.fp.set('maxDate',ultimo)}
-  refrescarPanelComp();
+  refrescarPanelComp(true);
 }
 function cerrarPanelComp(){const dd=$('compDropdown');if(dd&&!dd.hidden){dd.hidden=true;$('compBtn').setAttribute('aria-expanded','false')}}
 function initComparacion(){
   if(!$('compBtn'))return;
   $('compBtn').addEventListener('click',e=>{e.stopPropagation();$('compDropdown').hidden?abrirPanelComp():cerrarPanelComp()});
   document.addEventListener('click',e=>{if(!$('compField').contains(e.target))cerrarPanelComp()});
-  qa('.comp-atajo').forEach(btn=>btn.addEventListener('click',()=>{compUI.borrador={modo:btn.dataset.comp,desde:''};refrescarPanelComp()}));
   $('compCancelBtn').addEventListener('click',cerrarPanelComp);
+  $('compClearBtn').addEventListener('click',()=>{state.comp={modo:'none',desde:'',hasta:''};if(compUI.fp)compUI.fp.clear();$('compBtnText').textContent=textoBotonComp();cerrarPanelComp();render()});
   $('compApplyBtn').addEventListener('click',()=>{state.comp={...compUI.borrador};$('compBtnText').textContent=textoBotonComp();cerrarPanelComp();render()});
 }
 function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),a=aggregate(rows),ratio=a.target?a.actual/a.target:0;
@@ -3582,7 +3583,7 @@ function renderStoreVentaAcumulada(area,daily,ctx){
   // cada día quede encima de su día equivalente.
   const cmp=ctx.comp&&!ctx.comp.vacio?ctx.comp:null;
   let acum=0;
-  const serieComp=cmp?cmp.daily.map(d=>{acum+=d.actual;return{date:addDaysKey(d.date,cmp.rango.corrimiento),cumActual:acum}}):null;
+  const serieComp=cmp?cmp.daily.map(d=>{acum+=d.actual;return{date:addDaysKey(d.date,cmp.rango.corrimiento),cumActual:acum}}).filter(p=>p.date<=cmp.rango.principalHasta):null;
   renderCumulativeChart($('storeVentaAcum'),ctx.rows||[],ctx.monthCtx,{color:'#38BDF8',colorBanda:'rgba(56,189,248,.22)',gradId:'areaGlowLocal',sinHistorial:true,
     comparacion:serieComp&&serieComp.length?{series:serieComp,etiqueta:`Comparación · ${etiquetaRango(cmp.rango)}`}:null});
   renderStoreVentaChart($('storeVentaDiaria'),daily,cmp);
@@ -4346,7 +4347,7 @@ if($('menuToggle'))$('menuToggle').addEventListener('click',()=>{
   aplicarMenu(oculto);
   try{localStorage.setItem('vdh-menu-oculto',oculto?'1':'0')}catch(e){}
 });
-applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{state.comp={modo:'none',desde:''};if($('compBtnText'))$('compBtnText').textContent='Sin comparar';['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
+applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{state.comp={modo:'none',desde:'',hasta:''};if($('compBtnText'))$('compBtnText').textContent='Sin comparar';['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
 // ── BOTTOM NAV + DRAWER (mobile) ──────────────────────────────
 qa('.bottom-nav-item[data-view]').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 function openMainDrawer(){$('mainDrawerBackdrop').hidden=false;$('mainDrawerPanel').hidden=false;$('mainDrawerToggle').setAttribute('aria-expanded','true')}

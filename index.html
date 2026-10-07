@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <div class="update-banner" id="updateBanner" hidden>
@@ -101,14 +101,13 @@
             <svg class="icon-svg period-trigger-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
           <div class="period-dropdown period-calendar-dropdown comp-dropdown" id="compDropdown" role="dialog" aria-label="Comparar con otra fecha" hidden>
-            <div class="period-group-label">Atajos</div>
-            <button type="button" class="period-preset comp-atajo" data-comp="none">Sin comparar</button>
-            <button type="button" class="period-preset comp-atajo" data-comp="semana">Semana anterior</button>
-            <button type="button" class="period-preset comp-atajo" data-comp="mesanterior">Misma semana del mes anterior</button>
-            <div class="period-group-label">O elegí la fecha desde la que compara</div>
+            <div class="period-group-label">Elegí de qué fecha a qué fecha comparar</div>
             <div id="compCalendar" class="period-calendar"></div>
             <p class="comp-rango" id="compRango"></p>
+            <p class="comp-aviso" id="compAviso" hidden></p>
+            <p class="comp-tip">Para comparar día por día, elegí la misma cantidad de días y empezá el mismo día de la semana: de jueves a martes contra otro jueves a martes.</p>
             <div class="period-custom-actions">
+              <button type="button" class="text-button comp-quitar" id="compClearBtn">Quitar comparación</button>
               <button type="button" class="text-button" id="compCancelBtn">Cancelar</button>
               <button type="button" class="period-apply-btn" id="compApplyBtn">Aplicar</button>
             </div>

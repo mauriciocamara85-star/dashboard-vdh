@@ -1220,3 +1220,6 @@ html[data-theme="light"]{--comp:#7C3AED}
 .line-comp{stroke:var(--comp)!important;stroke-dasharray:6 5;opacity:1}
 .acum-local .line-node-prior{fill:var(--comp)}
 .legend-swatch-comp{background:repeating-linear-gradient(90deg,var(--comp) 0 3px,transparent 3px 5px)!important;height:3px!important}
+.comp-aviso{margin:6px 6px 0;max-width:290px;font-size:11.5px;line-height:1.45;color:var(--amber)}
+.comp-tip{margin:8px 6px 0;max-width:290px;font-size:11px;line-height:1.45;color:var(--muted)}
+.comp-quitar{margin-right:auto}
