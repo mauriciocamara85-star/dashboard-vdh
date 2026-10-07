@@ -2338,8 +2338,15 @@ function engancharSaludModal(){
   });
   document.addEventListener('keydown',e=>{if(e.key==='Escape')saludModalCerrar()});
 }
-function renderBars(rows,monthCtx){
-  const container=$('salesBars');
+function renderBars(rows,monthCtx){renderCumulativeChart($('salesBars'),rows,monthCtx)}
+// Acumulado real vs. objetivo con proyección, banda de confianza, HOY y avance del mes. Lo usan
+// Resumen general (#salesBars, naranja) y Locales → Venta vs. objetivo (celeste: pedido 2026-10-07,
+// "igual, tal vez cambiando algún color para que se diferencie"). opts: color (línea real, área,
+// proyección y tooltip), colorBanda, gradId (único por gráfico: los dos viven en el DOM a la vez y
+// un id repetido hace que el segundo tome el degradé del primero), sinHistorial (el semestre
+// anterior es de toda la red: para un local no corresponde).
+function renderCumulativeChart(container,rows,monthCtx,opts={}){
+  const color=opts.color||'#F97316',colorBanda=opts.colorBanda||'rgba(249,115,22,.25)',gradId=opts.gradId||'areaGlowMain';
   const byDate={};
   rows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!byDate[date])byDate[date]={target:0,actual:0};byDate[date].target+=num(row,'Objetivo');byDate[date].actual+=num(row,'Venta real')});
   const dates=Object.keys(byDate).sort();
@@ -2367,7 +2374,7 @@ function renderBars(rows,monthCtx){
 
   // Semestre anterior: null hoy (primer semestre trackeado, sin tabla LOCAL_DIARIO_ANTERIOR todavía) —
   // se arma la lógica igual para que la línea aparezca sola apenas exista el primer dato.
-  const priorSeries=priorSemesterSeries(domainStart);
+  const priorSeries=opts.sinHistorial?null:priorSemesterSeries(domainStart);
 
   const domainEnd=[lastDate,projection?.endDate,priorSeries?.length?priorSeries[priorSeries.length-1].date:null].filter(Boolean).sort().pop();
   const dayOffset=d=>Math.round((new Date(`${d}T00:00:00`)-new Date(`${domainStart}T00:00:00`))/86400000);
@@ -2398,7 +2405,7 @@ function renderBars(rows,monthCtx){
   // derecha. chart-legend-bottom la saca del position:absolute compartido con el resto de los charts
   // del dashboard (esos siguen arriba, tienen 2-3 items cortos y no tienen este problema) y la pone
   // en flujo normal después del eje, con wrap habilitado por si el panel se angosta.
-  const legend=`<div class="chart-legend chart-legend-bottom"><span><i class="legend-swatch" style="background:#52657d"></i>Ritmo objetivo</span><span><i class="legend-swatch" style="background:#F97316"></i>Ventas reales</span>${projection?`<span><i class="legend-swatch legend-swatch-dashed"></i>Proyección (FCDP)</span>`:''}${bandPath?`<span><i class="legend-swatch" style="background:rgba(249,115,22,.25)"></i>Banda de confianza</span>`:''}${priorPath?`<span><i class="legend-swatch" style="background:var(--muted)"></i>Historial</span>`:''}</div>`;
+  const legend=`<div class="chart-legend chart-legend-bottom"><span><i class="legend-swatch" style="background:#52657d"></i>Ritmo objetivo</span><span><i class="legend-swatch" style="background:${color}"></i>Ventas reales</span>${projection?`<span><i class="legend-swatch legend-swatch-dashed"></i>Proyección (FCDP)</span>`:''}${bandPath?`<span><i class="legend-swatch" style="background:${colorBanda}"></i>Banda de confianza</span>`:''}${priorPath?`<span><i class="legend-swatch" style="background:var(--muted)"></i>Historial</span>`:''}</div>`;
   // Puntos visibles en Objetivo/Real: con 1-2 días cargados el tramo real puede quedar apenas unos
   // píxeles de ancho junto a una proyección de meses — sin estos "nodos" esa línea corta se ve
   // directamente invisible al lado de la proyección. Con 1 solo día, el path ni siquiera dibuja
@@ -2422,8 +2429,8 @@ function renderBars(rows,monthCtx){
     const diasRestantesMes=Math.max(0,diasEnMes-diasTranscurridos);
     return`<div class="month-progress"><div class="month-progress-head"><span class="section-kicker">AVANCE DEL MES</span><span class="month-progress-stat">${diasTranscurridos} / ${diasEnMes} días · ${pct}%</span></div><div class="month-progress-track"><div class="month-progress-fill" style="width:${pct}%"></div></div><div class="month-progress-foot"><span>Quedan ${diasRestantesMes} día${diasRestantesMes===1?'':'s'}</span><span>${avgDailyReal!==null?money(avgDailyReal):'—'}/día real · ${avgDailyProy!==null?money(avgDailyProy):'—'}/día proy.</span></div></div>`;
   })():'';
-  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="areaGlowMain" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B00" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#FF6B00" stop-opacity="0"></stop></linearGradient></defs>${bandPath?`<path class="line-band" d="${bandPath}"></path>`:''}<path class="line-area" d="${area}" style="fill:url(#areaGlowMain)"></path>${priorPath?`<path class="line-prior" d="${priorPath}"></path>`:''}<path class="line-target" d="${path('cumTarget')}"></path>${projectionPath?`<path class="line-projection" d="${projectionPath}"></path>`:''}<path class="line-actual" d="${path('cumActual')}"></path>${nodesFor('cumTarget','line-node-target')}${nodesFor('cumActual','line-node-actual')}<circle class="line-dot" cx="${x(last.date).toFixed(1)}" cy="${y(last.cumActual).toFixed(1)}" r="4"><title>${money(last.cumActual)} al ${formatDateAR(last.date)}</title></circle><line class="hoy-line" x1="${hoyX.toFixed(1)}" y1="0" x2="${hoyX.toFixed(1)}" y2="${h}"></line><text class="hoy-label" x="${hoyLabelX.toFixed(1)}" y="10" text-anchor="${hoyAnchor}">HOY</text><line class="hover-line" x1="0" y1="0" x2="0" y2="${h}" style="display:none"></line>${hoverDots}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(domainStart)}</span><span>${money(last.cumActual)} vs ${money(last.cumTarget)}</span><span>${formatDateShortAR(domainEnd)}</span></div>${legend}${note}${monthProgress}`;
-  attachChartHover(container,{w,domainStart,domainSpan,x,y,points,lastDate,last,projection,priorSeries});
+  container.innerHTML=`<svg class="line-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${opts.color?color:'#FF6B00'}" stop-opacity="0.25"></stop><stop offset="100%" stop-color="${opts.color?color:'#FF6B00'}" stop-opacity="0"></stop></linearGradient></defs>${bandPath?`<path class="line-band" d="${bandPath}"></path>`:''}<path class="line-area" d="${area}" style="fill:url(#${gradId})"></path>${priorPath?`<path class="line-prior" d="${priorPath}"></path>`:''}<path class="line-target" d="${path('cumTarget')}"></path>${projectionPath?`<path class="line-projection" d="${projectionPath}"></path>`:''}<path class="line-actual" d="${path('cumActual')}"></path>${nodesFor('cumTarget','line-node-target')}${nodesFor('cumActual','line-node-actual')}<circle class="line-dot" cx="${x(last.date).toFixed(1)}" cy="${y(last.cumActual).toFixed(1)}" r="4"><title>${money(last.cumActual)} al ${formatDateAR(last.date)}</title></circle><line class="hoy-line" x1="${hoyX.toFixed(1)}" y1="0" x2="${hoyX.toFixed(1)}" y2="${h}"></line><text class="hoy-label" x="${hoyLabelX.toFixed(1)}" y="10" text-anchor="${hoyAnchor}">HOY</text><line class="hover-line" x1="0" y1="0" x2="0" y2="${h}" style="display:none"></line>${hoverDots}</svg><div class="chart-tooltip" hidden></div><div class="line-axis"><span>${formatDateShortAR(domainStart)}</span><span>${money(last.cumActual)} vs ${money(last.cumTarget)}</span><span>${formatDateShortAR(domainEnd)}</span></div>${legend}${note}${monthProgress}`;
+  attachChartHover(container,{w,domainStart,domainSpan,x,y,points,lastDate,last,projection,priorSeries,color});
 }
 // Tooltip al pasar el mouse (o el dedo) sobre el gráfico: convierte la posición X en una fecha del
 // período mostrado y arma una fila por serie con su valor en ese punto — así se entiende de un
@@ -2459,8 +2466,8 @@ function attachChartHover(container,cfg){
     const rows=[];
     const place=(dot,value,label,color)=>{if(value===null||value===undefined){if(dot)dot.style.display='none';return}rows.push({label,color,value});if(dot){dot.setAttribute('cx',px.toFixed(1));dot.setAttribute('cy',cfg.y(value).toFixed(1));dot.style.display='block'}};
     place(dotTarget,hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumTarget',hoverDate):null,'Ritmo objetivo','#52657d');
-    place(dotActual,hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumActual',hoverDate):null,'Ventas reales','#F97316');
-    place(dotProjection,cfg.projection?projectionValueAt(hoverDate):null,'Proyección (FCDP)','#F97316');
+    place(dotActual,hoverDate<=cfg.lastDate?valueAtStep(cfg.points,'cumActual',hoverDate):null,'Ventas reales',cfg.color||'#F97316');
+    place(dotProjection,cfg.projection?projectionValueAt(hoverDate):null,'Proyección (FCDP)',cfg.color||'#F97316');
     const priorInRange=cfg.priorSeries?.length&&hoverDate<=cfg.priorSeries[cfg.priorSeries.length-1].date;
     place(dotPrior,priorInRange?valueAtStep(cfg.priorSeries,'cumActual',hoverDate):null,'Historial','var(--muted)');
     if(!rows.length)return hide();
@@ -2792,7 +2799,14 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   // sumEntityProjections, auditoría 2026-09-06).
   const projection=sumEntityProjections(allMonthRows,row=>row.Local);
   const daily=storeDailySeries(rows);
-  const kpiCtx={a,ratio,avgConv,avgConvObj,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection};
+  // "Avance del mes" del acumulado de Venta vs. objetivo: misma cuenta que en Resumen general
+  // (monthProgressCtx), sobre el local filtrado. Días del mes en curso con datos hasta el último
+  // cargado; el ritmo proyectado sale de la misma proyección ponderada de la tarjeta 02.
+  const corteMes=objectiveCutoff(),filasMesCargadas=allMonthRows.filter(row=>{const f=normalizeDate(row.Fecha);return f&&f<=corteMes});
+  const diasMesCargados=new Set(filasMesCargadas.map(row=>normalizeDate(row.Fecha))).size,ventaMesCargada=aggregate(filasMesCargadas).actual;
+  const monthCtx={monthTarget,diasEnMes:daysInCalendarMonth(corteMes),diasTranscurridos:diasMesCargados,avgDailyReal:diasMesCargados?ventaMesCargada/diasMesCargados:null,
+    avgDailyProy:projection?(projection.ponderada-projection.actual)/Math.max(1,projection.diasRestantes):null};
+  const kpiCtx={a,ratio,avgConv,avgConvObj,hasConvObj,brechaConv,avgTicket,avgTicketObj,hasTicketObj,avgCash,avgCard,avgDiscount,hasPayment,monthTarget,projection,rows,monthCtx};
   renderStoreKpiGrid(kpiCtx,daily);
   renderStoreChart(daily,kpiCtx);
 
@@ -2912,7 +2926,7 @@ function storeDailySeries(rows){
   });
 }
 const STORE_KPI_META={
-  venta:{kicker:'VENTA VS. OBJETIVO',heading:'Venta real vs. objetivo, por día'},
+  venta:{kicker:'VENTA VS. OBJETIVO',heading:'Venta acumulada vs. objetivo'},
   proyeccion:{kicker:'PROYECCIÓN DE CIERRE',heading:'Curva proyectada vs. meta mensual'},
   conversion:{kicker:'CONVERSIÓN %',heading:'Conversión diaria'},
   ticket:{kicker:'TICKET PROMEDIO $',heading:'Ticket promedio diario'},
@@ -3385,11 +3399,19 @@ function renderStoreChart(daily,ctx){
   if(state.storeMetric==='pagos'){area.className='';renderStorePaymentBreakdown(area,daily,ctx);return}
   if(!daily.length){area.className='bar-chart empty-state';area.innerHTML='Conectá la fuente para ver la evolución.';return}
   area.className='bar-chart';
-  if(state.storeMetric==='venta')return renderStoreVentaChart(area,daily);
+  if(state.storeMetric==='venta')return renderStoreVentaAcumulada(area,daily,ctx);
   if(state.storeMetric==='proyeccion')return renderStoreProjectionChart(area,daily,ctx);
   if(state.storeMetric==='conversion')return renderStoreConversionModule(area,daily,ctx);
   if(state.storeMetric==='ticket')return renderStoreTicketModule(area,daily,ctx);
   if(state.storeMetric==='trafico')return renderStoreTrafficModule(area,daily);
+}
+// Card 01: arriba el acumulado real vs. objetivo, igual al de Resumen general pero en celeste para
+// que se distinga (pedido 2026-10-07); abajo, el día a día con las barras semáforo de siempre.
+function renderStoreVentaAcumulada(area,daily,ctx){
+  area.className='';
+  area.innerHTML='<div id="storeVentaAcum" class="bar-chart acum-local"></div><div class="store-dia-a-dia"><span class="section-kicker">DÍA A DÍA</span><div id="storeVentaDiaria" class="bar-chart"></div></div>';
+  renderCumulativeChart($('storeVentaAcum'),ctx.rows||[],ctx.monthCtx,{color:'#38BDF8',colorBanda:'rgba(56,189,248,.22)',gradId:'areaGlowLocal',sinHistorial:true});
+  renderStoreVentaChart($('storeVentaDiaria'),daily);
 }
 // Card 01 — mismo lenguaje visual que "Día a día" del Resumen General (barras agrupadas
 // semáforo + roundedTopBarPath), reusado tal cual acá para no duplicar el estilo.

@@ -1187,3 +1187,14 @@ html[data-theme="light"] .focus-group td strong{color:#1E3552}
 .evo-desvio em.good,.evo-callout em.good{color:var(--mint)}
 .evo-desvio em.warning,.evo-callout em.warning{color:var(--amber)}
 .evo-desvio em.bad,.evo-callout em.bad{color:var(--red)}
+/* Locales → Venta vs. objetivo: el acumulado de Resumen general en celeste */
+.acum-local{--acum:#38BDF8}
+.acum-local .line-actual,.acum-local .line-projection{stroke:var(--acum)}
+.acum-local .line-node-actual,.acum-local .line-dot{fill:var(--acum)}
+.acum-local .line-band{fill:rgba(56,189,248,.14)}
+.acum-local .legend-swatch-dashed{background:repeating-linear-gradient(90deg,var(--acum) 0 3px,transparent 3px 5px)!important}
+.acum-local .month-progress-fill{background:linear-gradient(90deg,var(--acum),#BAE6FD)}
+html[data-theme="light"] .acum-local{--acum:#0284C7}
+.store-dia-a-dia{margin-top:26px;padding-top:20px;border-top:1px solid var(--line)}
+/* Ventas por sucursal: las dos tablas quedaban pegadas */
+#storeBreakdownPanel>.panel+.panel{margin-top:22px}
