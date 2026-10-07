@@ -201,7 +201,15 @@ function updatePeriod(){
 }
 function todayKey(){const today=new Date();return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`}
 function lastLoadedDate(name){const rows=state.tables[name]||[];const dates=rows.filter(row=>num(row,'Venta real')||num(row,'Tráfico real')||num(row,'Ticket prom.')).map(row=>normalizeDate(row.Fecha)).filter(Boolean).sort();return dates.length?dates[dates.length-1]:''}
-function objectiveCutoff(){return $('toDate').value||lastLoadedDate('LOCAL_DIARIO')||todayKey()}
+// Hasta qué día se mide "a la fecha": el fin del período elegido, pero NUNCA más allá del último día
+// con datos cargados. Desde que el dashboard arranca en "Mes actual" el período llega hasta hoy, y
+// a las 10 de la mañana hoy no tiene nada cargado: su objetivo entraba entero contra $0 de venta.
+// El 07/10 eso mostraba 86,2% de cumplimiento y −12,3 pts cuando al cierre de ayer se iba en 98,5%.
+function objectiveCutoff(){
+  const hasta=$('toDate').value,ultimo=lastLoadedDate('LOCAL_DIARIO');
+  if(hasta&&ultimo)return hasta<ultimo?hasta:ultimo;
+  return hasta||ultimo||todayKey();
+}
 function rowsThroughToday(rows){const cutoff=objectiveCutoff();return rows.filter(row=>{const date=normalizeDate(row.Fecha||row['Fecha foto']);return date&&date<=cutoff})}
 async function loadData(){
   if(!state.endpoint){setStatus('Sin configurar');showError('No hay una fuente de datos configurada en este navegador.');hideAppLoading();return}
