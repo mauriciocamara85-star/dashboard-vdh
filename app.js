@@ -1,4 +1,6 @@
-const DATA_ENDPOINT='https://script.google.com/macros/s/AKfycbyuS6K8oq2KWJ6BMSayHXHHSf0v2jr70OoSD4UfwX77cD3OobN1OrzFsTTXC6JI9Yo/exec';
+// Los datos salen directo del Sistema VDH (función ventas-tablero, 26/10/2026): las mismas tablas que armaba el
+// consolidador de Google con las planillas de los locales, ahora con lo que se carga en el sistema.
+const DATA_ENDPOINT='https://gfjdjupuwxohkgchqykx.supabase.co/functions/v1/ventas-tablero';
 const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta',comp:{modo:'none',desde:'',hasta:''}};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
@@ -249,7 +251,7 @@ async function loadData(){
   }catch(error){
     const timedOut=error.name==='AbortError';
     setStatus('Error de conexión');
-    showError(timedOut?'El consolidador no respondió (lo intentamos dos veces, más de un minuto en total). Se siguen viendo los últimos datos cargados; probá actualizar en un rato.':`No se pudieron cargar los datos del consolidado. Detalle: ${error.message}`);
+    showError(timedOut?'El sistema no respondió (lo intentamos dos veces, más de un minuto en total). Se siguen viendo los últimos datos cargados; probá actualizar en un rato.':`No se pudieron cargar los datos del sistema. Detalle: ${error.message}`);
   }finally{
     hideAppLoading();stopRefreshSpin();
   }
