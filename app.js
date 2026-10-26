@@ -4090,12 +4090,12 @@ function initPeriodPicker(){
 // de la temporada en curso —hoy Verano 2027, sep 2026 a feb 2027— y los montos son el ACUMULADO de la
 // temporada, no un mes.
 // Lo único que se suma acá son los totales de los locales que se muestran: la planilla tiene locales
-// que el dashboard no (MDQ San Martín, Quilmes, San Justo 2) y no tiene DOT todavía, así que su fila
+// que el dashboard no (MDQ San Martín, Quilmes, San Justo 2) o le faltan locales, así que su fila
 // "Total" no corresponde a lo que se ve. Se muestran solo los que están en los dos lados.
 const RENT_CAMPOS_PLATA=['Venta Total','Facturado','No facturado','Cantidad','Tickets','Tráfico','Ventas Fallidas','Gastos Total','Gastos Plan de cuentas','Empleados','Tarjeta','Iva','CMV','Rentabilidad'];
 // Código de la planilla (entre paréntesis después del nombre) → local del dashboard, normalizado.
-// Para los que no están acá se compara por nombre (ver rentLocalDelDashboard): así cuando agreguen
-// DOT se engancha solo aunque usen un código nuevo.
+// Para los que no están acá se compara por nombre (ver rentLocalDelDashboard): así DOT, que está en
+// la planilla sin código, se engancha solo.
 const RENT_CODIGOS={CAB:'CASEROS',ITB:'ITUZAINGO',MD2:'RIVADAVIA',MOR:'MORON',PCH:'PACHECO',SJU:'SANJUSTO1',FLO:'FLORES',SJB:'SANJUSTOSHOPPING',LZB:'LOMASDEZAMORA',SUN:'UNICENTER',SPB:'PARQUEBROWN',VPA:'VILLADELPARQUE',GRB:'GRANDBOURG'};
 const rentNorm=t=>String(t??'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\bI\b/g,'1').replace(/[^A-Z0-9]/g,'');
 // Monto corto en millones con coma decimal ($548,5M); moneyShort usa punto, que acá se lee como miles.
@@ -4108,9 +4108,11 @@ function rentLocalDelDashboard(fila,localesDash){
   if(porCodigo&&porNorm[porCodigo])return porNorm[porCodigo];
   const n=rentNorm(fila.Local);
   if(porNorm[n])return porNorm[n];
-  // "MDQ Rivadavia" → RIVADAVIA, "Shopping Dot" → DOT: el nombre de la planilla TERMINA con el del
-  // dashboard. No se busca "contiene" a secas para que "MDQ San Martin" no se pegue a nada.
-  return localesDash.find(l=>{const d=rentNorm(l);return d.length>=3&&n.endsWith(d)})||null;
+  // "MDQ Rivadavia" → RIVADAVIA, "Dot Shopping" → DOT: el nombre de la planilla EMPIEZA o TERMINA con
+  // el del dashboard. DOT entró a la planilla como "Dot Shopping", sin código, y con "termina" solo
+  // quedaba afuera (2026-10-26). No se busca "contiene" a secas para que "MDQ San Martin" no se pegue
+  // a nada.
+  return localesDash.find(l=>{const d=rentNorm(l);return d.length>=3&&(n.startsWith(d)||n.endsWith(d))})||null;
 }
 const rentVal=(f,k)=>{const v=f?.[k];return v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v)};
 const rentGuion='<span class="missing-value">—</span>';
