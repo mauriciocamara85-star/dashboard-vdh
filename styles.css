@@ -1009,6 +1009,12 @@ body.modal-abierto{overflow:hidden}
 html[data-theme="light"] .store-kpi-card.active .store-kpi-index,
 html[data-theme="light"] .store-kpi-card.active .store-kpi-label{color:#B45309}
 .store-kpi-value{font:600 21px var(--display);color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Desvío de la tarjeta 01 ("Objetivo a la fecha"), con el semáforo, al lado del monto como en el
+   Resumen general: en su propio renglón agrandaba las seis tarjetas (van en filas del mismo alto). */
+.store-kpi-pct{font:700 16px var(--display);margin-left:9px;color:var(--white)}
+.store-kpi-pct.good{color:var(--mint)}
+.store-kpi-pct.warning{color:var(--amber)}
+.store-kpi-pct.bad{color:var(--red)}
 .store-kpi-sub{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Mini gráfico de cada tarjeta (ver sparklineSvg/sparkStackSvg en app.js). Va pegado abajo con
    margin-top:auto para que las seis tarjetas apoyen su curva a la misma altura aunque el texto de

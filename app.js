@@ -3171,13 +3171,13 @@ function renderStoreKpiGrid(ctx,daily){
   spark('trafico',sparklineSvg(serie.map(d=>d.traffic),alineada('traffic')));
   spark('pagos',hasPayment?sparkStackSvg([{valor:avgCash,cls:'spark-seg-a'},{valor:avgCard,cls:'spark-seg-b'}]):'');
 
-  $('storeKpiValue-venta').textContent=money(a.actual);
-  // "X% del objetivo a la fecha" (no "X% de avance del mes"): esto compara contra lo esperado A LA
-  // FECHA (prorrateado a los días ya transcurridos/filtrados), no contra el objetivo del MES
-  // completo — son dos preguntas distintas ("¿voy al ritmo esperado hoy?" vs "¿cuánto del mes ya
-  // cerré?"). La planilla de cada local usa esa segunda definición para su "Avance del mes" — el
-  // texto viejo ("X% de avance") se prestaba a confundir los dos (auditoría 2026-09-06).
-  $('storeKpiSub-venta').textContent=`${percent(ratio*100)} del objetivo a la fecha`;
+  // Se lee igual que "Objetivo a la fecha" del Resumen general (pedido 2026-10-28): el objetivo
+  // primero, el desvío con el semáforo y la venta debajo; acá sólo de los locales, sin e-commerce.
+  // Es contra lo esperado A LA FECHA (prorrateado a los días ya transcurridos/filtrados), no contra
+  // el objetivo del MES completo, que es el "Avance del mes" de la planilla (auditoría 2026-09-06).
+  const desvioHoy=a.target?`<span class="store-kpi-pct ${statusTone(ratio)}">${ratio>=1?'+':''}${percent((ratio-1)*100)}</span>`:'';
+  $('storeKpiValue-venta').innerHTML=`${money(a.target)}${desvioHoy}`;
+  $('storeKpiSub-venta').textContent=a.target?`Venta real ${money(a.actual)} · desvío contra lo esperado a hoy`:`Venta real ${money(a.actual)} · sin objetivo cargado`;
 
   if(projection){
     const desvio=projection.ponderada-monthTarget,desvioPct=monthTarget?desvio/monthTarget*100:null;
