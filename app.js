@@ -213,12 +213,24 @@ function lastLoadedDate(name){const rows=state.tables[name]||[];const dates=rows
 // con datos cargados. Desde que el dashboard arranca en "Mes actual" el período llega hasta hoy, y
 // a las 10 de la mañana hoy no tiene nada cargado: su objetivo entraba entero contra $0 de venta.
 // El 07/10 eso mostraba 86,2% de cumplimiento y −12,3 pts cuando al cierre de ayer se iba en 98,5%.
+//
+// Y tampoco más allá de AYER. Desde el 26/10 los locales cargan en el sistema durante el día (en la
+// planilla cargaban a la noche): con la primera venta de la mañana, hoy pasaba a ser "el último día
+// cargado" y su objetivo entraba entero contra casi nada de venta. El 28/10 a las 9:16 bastaron
+// $74.000 de Ituzaingó para que "Mes actual" diera 88,9% en vez del 91,6% del cierre de ayer. Igual
+// que la hoja de Ventas del sistema ("A hoy cuenta hasta ayer"). Si el período ARRANCA hoy ("Hoy", o
+// "Semana actual" un lunes) no tiene ningún día terminado adentro: ahí se muestra lo de hoy como viene.
+function lastCompleteDate(name){const ultimo=lastLoadedDate(name),ayer=addDaysKey(todayKey(),-1);return ultimo>ayer?ayer:ultimo}
+function periodoArrancaHoy(){const desde=$('fromDate').value;return!!desde&&desde>=todayKey()}
 function objectiveCutoff(){
-  const hasta=$('toDate').value,ultimo=lastLoadedDate('LOCAL_DIARIO');
+  const hasta=$('toDate').value,ultimo=periodoArrancaHoy()?lastLoadedDate('LOCAL_DIARIO'):lastCompleteDate('LOCAL_DIARIO');
   if(hasta&&ultimo)return hasta<ultimo?hasta:ultimo;
   return hasta||ultimo||todayKey();
 }
-function rowsThroughToday(rows){const cutoff=objectiveCutoff();return rows.filter(row=>{const date=normalizeDate(row.Fecha||row['Fecha foto']);return date&&date<=cutoff})}
+// Lo del MES (Ritmo necesario, Avance del mes) corta en el último día terminado aunque el período
+// arranque hoy: con "Hoy" decía "3 días restantes" al lado de los 4 del Cierre estimado.
+function corteDelMes(){const corte=objectiveCutoff(),ultimo=lastCompleteDate('LOCAL_DIARIO');return ultimo&&ultimo<corte?ultimo:corte}
+function rowsThroughToday(rows,cutoff=objectiveCutoff()){return rows.filter(row=>{const date=normalizeDate(row.Fecha||row['Fecha foto']);return date&&date<=cutoff})}
 async function loadData(){
   if(!state.endpoint){setStatus('Sin configurar');showError('No hay una fuente de datos configurada en este navegador.');hideAppLoading();return}
   setStatus('Conectando...');showError('');startRefreshSpin();
@@ -1133,7 +1145,21 @@ function evoMesElegido(){return rankMeses().includes(state.evoMes)?state.evoMes:
 function evoSemanaElegida(){const mes=evoMesElegido();return mes!=='all'&&rankSemanasDelMes(mes).includes(state.evoSemana)?state.evoSemana:'all'}
 // Hasta qué día hay datos para Evolución: el último día cargado. A propósito NO usa el período de
 // arriba (toDate), que en Ranking ni se ve: quedaría cortando la evolución sin que se note por qué.
-function corteEvolucion(){return lastLoadedDate('LOCAL_DIARIO')||todayKey()}
+// Hoy no cuenta mientras está entrando (ver objectiveCutoff): la semana en curso va hasta ayer.
+function corteEvolucion(){return lastCompleteDate('LOCAL_DIARIO')||todayKey()}
+// La venta cargada DESPUÉS del corte (la de hoy), por grupo y semana, de VENDEDOR_DIARIO con los
+// mismos filtros de Local/Vendedor. VENDEDOR_SEMANAL la trae adentro del total de la semana (es la
+// suma de los días: 525 de 525 iguales el 28/10), así que contra el objetivo hasta ayer hay que
+// sacarla; si no, la semana en curso suma la venta de hoy sin su objetivo.
+function ventaDespuesDelCorte(grupoDe,corte){
+  const local=$('localFilter').value,seller=$('sellerFilter').value,acc={};
+  (state.tables.VENDEDOR_DIARIO||[]).forEach(r=>{
+    if(String(r.Fecha??'').slice(0,10)<=corte)return;
+    if((local!=='all'&&String(r.Local??'')!==local)||(seller!=='all'&&String(r.Vendedor??'')!==seller))return;
+    const k=`${grupoDe(r)}|${weekKeyOf(r)}`;acc[k]=(acc[k]||0)+num(r,'Venta real');
+  });
+  return(grupo,weekKey)=>acc[`${grupo}|${weekKey}`]||0;
+}
 // La semana que contiene el último día cargado, si todavía le quedan días por delante.
 function semanaEnCursoKey(){
   const corte=corteEvolucion(),filas=state.tables.LOCAL_DIARIO||[];
@@ -1279,14 +1305,15 @@ function vendorHistory(){
   // los días que ya pasaron: el martes daba 30% y "−76 pts de mejora" a cualquiera (Morón, Semana 2
   // de Octubre, 2026-10-07). Ahora se compara contra el objetivo hasta el último día cargado, con
   // el reparto por día de VENDEDOR_DIARIO. Semanas cerradas: igual que siempre.
-  const avance=avanceDeSemanas(r=>local==='all'?r.Vendedor:`${r.Vendedor}|${r.Local}`,corteEvolucion());
+  const corte=corteEvolucion(),avance=avanceDeSemanas(r=>local==='all'?r.Vendedor:`${r.Vendedor}|${r.Local}`,corte),despues=ventaDespuesDelCorte(r=>r.Vendedor,corte);
   const groups={};
   rows.forEach(row=>{
     const key=row.Vendedor,wk=weekKeyOf(row),f=avance(local==='all'?key:`${key}|${local}`,wk),obj=num(row,'Venta obj')*f;
     if(f<=0)return;
+    const real=num(row,'Venta real')-despues(key,wk);
     if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),weeks:[]};
     row.Local.split(' + ').forEach(l=>groups[key].locales.add(l));
-    groups[key].weeks.push({weekKey:wk,enCurso:f<1,real:num(row,'Venta real'),obj,ratio:obj?num(row,'Venta real')/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
+    groups[key].weeks.push({weekKey:wk,enCurso:f<1,real,obj,ratio:obj?real/obj*100:null,tp:num(row,'TP real'),conv:convRate(row,'Conv real'),pxt:num(row,'PxT real')});
   });
   return Object.values(groups).map(g=>{
     g.weeks.sort((a,b)=>weekKeyOrder(a.weekKey)-weekKeyOrder(b.weekKey));
@@ -1313,7 +1340,7 @@ function localHistory(unificar=false){
   });
   // Semana en curso contra el objetivo a la fecha — mismo motivo que en vendorHistory.
   const claveAvance=r=>unificar?'red':seller==='all'?String(r.Local??''):`${r.Local}|${r.Vendedor}`;
-  const avance=avanceDeSemanas(claveAvance,corteEvolucion());
+  const corte=corteEvolucion(),avance=avanceDeSemanas(claveAvance,corte),despues=ventaDespuesDelCorte(grupoDe,corte);
   // Ticket, conversión y PxT de cada semana: de la planilla del local (LOCAL_DIARIO), ponderados como
   // en Locales y en la propia planilla. Promediar lo que cargó cada vendedor no da lo mismo: Rivadavia
   // Semana 1 de Octubre daba $68.086 de ticket contra $70.267 de la planilla (2026-10-07). Con un
@@ -1325,9 +1352,9 @@ function localHistory(unificar=false){
   });
   return Object.keys(groups).map(loc=>{
     const weeks=Object.keys(groups[loc]).sort((a,b)=>weekKeyOrder(a)-weekKeyOrder(b)).map(wk=>{
-      const w=groups[loc][wk],f=avance(unificar?'red':seller==='all'?loc:`${loc}|${seller}`,wk),obj=w.target*f;
+      const w=groups[loc][wk],f=avance(unificar?'red':seller==='all'?loc:`${loc}|${seller}`,wk),obj=w.target*f,real=w.actual-despues(loc,wk);
       const p=pondSemana[`${loc}|${wk}`]?cerrarPonderado(pondSemana[`${loc}|${wk}`]):null;
-      return{weekKey:wk,f,enCurso:f<1,real:w.actual,obj,ratio:obj?w.actual/obj*100:null,
+      return{weekKey:wk,f,enCurso:f<1,real,obj,ratio:obj?real/obj*100:null,
         tp:p?p.ticket:w.tpCount?w.tpSum/w.tpCount:0,conv:p?p.conversion:w.convCount?w.convSum/w.convCount:0,pxt:p?p.pxt:w.pxtCount?w.pxtSum/w.pxtCount:0};
     }).filter(w=>w.f>0);
     return{local:loc,weeks};
@@ -2129,7 +2156,7 @@ function renderOverview(){
   // necesario" — cuando octubre llevaba $119.000 vendidos y le faltaban $245,8 millones.
   //
   // Estas series salen SOLO del mes en curso, sin importar qué período muestre el filtro de arriba.
-  const monthDaily=dailySeries(rowsThroughToday(monthRows)),monthCum=cumulativeSeries(monthDaily);
+  const monthDaily=dailySeries(rowsThroughToday(monthRows,corteDelMes())),monthCum=cumulativeSeries(monthDaily);
   const monthLastIdx=monthDaily.length-1,monthPrevIdx=monthLastIdx-1;
   const monthActual=monthLastIdx>=0?monthCum[monthLastIdx].actual:0;
   const monthDias=monthDaily.length;
@@ -2938,7 +2965,7 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
   // "Avance del mes" del acumulado de Venta vs. objetivo: misma cuenta que en Resumen general
   // (monthProgressCtx), sobre el local filtrado. Días del mes en curso con datos hasta el último
   // cargado; el ritmo proyectado sale de la misma proyección ponderada de la tarjeta 02.
-  const corteMes=objectiveCutoff(),filasMesCargadas=allMonthRows.filter(row=>{const f=normalizeDate(row.Fecha);return f&&f<=corteMes});
+  const corteMes=objectiveCutoff(),filasMesCargadas=rowsThroughToday(allMonthRows,corteDelMes());
   const diasMesCargados=new Set(filasMesCargadas.map(row=>normalizeDate(row.Fecha))).size,ventaMesCargada=aggregate(filasMesCargadas).actual;
   const monthCtx={monthTarget,diasEnMes:daysInCalendarMonth(corteMes),diasTranscurridos:diasMesCargados,avgDailyReal:diasMesCargados?ventaMesCargada/diasMesCargados:null,
     avgDailyProy:projection?(projection.ponderada-projection.actual)/Math.max(1,projection.diasRestantes):null};
@@ -2959,8 +2986,9 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
 // filtrado a esa entidad. "Cargado" = Venta real > 0 (no "hay tráfico pero sin venta cargada" como
 // antes): mismo criterio exacto que usa el SUMPRODUCTO de la planilla de cada local, para que el
 // día a día que entra en la ponderación sea idéntico al de la planilla (auditoría 2026-09-06).
+// Hoy no entra como día cargado aunque ya tenga alguna venta: está a medio cargar (ver objectiveCutoff).
 function storeProjection(monthRows){
-  const perDate={};
+  const perDate={},hoy=todayKey();
   monthRows.forEach(row=>{
     const date=normalizeDate(row.Fecha);
     if(!date)return;
@@ -2972,7 +3000,7 @@ function storeProjection(monthRows){
   let monthTarget=0;
   Object.keys(perDate).forEach(d=>{
     monthTarget+=perDate[d].target;
-    if(perDate[d].actual>0){loadedActual[d]=perDate[d].actual;loadedTarget[d]=perDate[d].target}
+    if(perDate[d].actual>0&&d<hoy){loadedActual[d]=perDate[d].actual;loadedTarget[d]=perDate[d].target}
   });
   const dates=Object.keys(loadedActual);
   if(!dates.length)return null;
@@ -3722,7 +3750,9 @@ function renderEcommerce(){
   // objetivo del jueves 17) y bajaba el cumplimiento de 77,3% a 73,5% — y encima la misma tarjeta
   // decía "16 días cargados" (bug real reportado 2026-09-17 con captura de la planilla). Si el
   // usuario pone un "Hasta" ANTERIOR al último día cargado, ese filtro sigue mandando.
-  const lastLoaded=loadedDates.length?loadedDates[loadedDates.length-1]:'';
+  // Tampoco más allá de ayer: la tienda trae los pedidos de hoy apenas se pagan (ver objectiveCutoff).
+  const hoy=todayKey(),ultimoCargado=loadedDates.length?loadedDates[loadedDates.length-1]:'';
+  const lastLoaded=!periodoArrancaHoy()&&ultimoCargado>=hoy?addDaysKey(hoy,-1):ultimoCargado;
   const cutoff=(to&&(!lastLoaded||to<lastLoaded))?to:(lastLoaded||to||todayKey());
   const daily=dailyAll.filter(row=>normalizeDate(row.Fecha)<=cutoff);
   const a=aggregate(daily),ratio=a.target?a.actual/a.target:0,delta=a.actual-a.target;
@@ -3749,7 +3779,7 @@ function renderEcommerce(){
   let ecomMonthTarget=0;
   Object.keys(perDateMonth).forEach(d=>{
     ecomMonthTarget+=perDateMonth[d].target;
-    if(perDateMonth[d].actual>0){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}
+    if(perDateMonth[d].actual>0&&d<hoy){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}
   });
   const ritmoNecesario=diasRestantes?Math.max(0,ecomMonthTarget-a.actual)/diasRestantes:0;
   // "Cumplimiento a la fecha", no "Avance del mes": ratio compara contra a.target, que es el
