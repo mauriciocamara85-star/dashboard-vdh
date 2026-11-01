@@ -2987,20 +2987,26 @@ function renderStores(){const rows=rowsThroughToday(activeRows('LOCAL_DIARIO')),
 // antes): mismo criterio exacto que usa el SUMPRODUCTO de la planilla de cada local, para que el
 // día a día que entra en la ponderación sea idéntico al de la planilla (auditoría 2026-09-06).
 // Hoy no entra como día cargado aunque ya tenga alguna venta: está a medio cargar (ver objectiveCutoff).
+// E-commerce: un día con Visitas y Venta real $0 también es día cargado —vendió $0 de verdad—, el
+// mismo criterio que ya usaba "días cargados" de la pestaña E-commerce (loadedDates). Antes se
+// proyectaba como si faltara cargar: octubre cerró con el online en $3.828.115 y el Cierre estimado
+// del 01/11 lo daba en $5.048.358, porque rellenaba los 7 días en $0 (charla 2026-11-01). Los locales
+// no tienen la columna Visitas, así que para ellos sigue siendo Venta real > 0, como la planilla.
 function storeProjection(monthRows){
   const perDate={},hoy=todayKey();
   monthRows.forEach(row=>{
     const date=normalizeDate(row.Fecha);
     if(!date)return;
-    if(!perDate[date])perDate[date]={actual:0,target:0};
+    if(!perDate[date])perDate[date]={actual:0,target:0,visitas:0};
     perDate[date].actual+=num(row,'Venta real');
     perDate[date].target+=num(row,'Objetivo');
+    perDate[date].visitas+=num(row,'Visitas');
   });
   const loadedActual={},loadedTarget={};
   let monthTarget=0;
   Object.keys(perDate).forEach(d=>{
     monthTarget+=perDate[d].target;
-    if(perDate[d].actual>0&&d<hoy){loadedActual[d]=perDate[d].actual;loadedTarget[d]=perDate[d].target}
+    if((perDate[d].actual>0||perDate[d].visitas>0)&&d<hoy){loadedActual[d]=perDate[d].actual;loadedTarget[d]=perDate[d].target}
   });
   const dates=Object.keys(loadedActual);
   if(!dates.length)return null;
@@ -3774,12 +3780,13 @@ function renderEcommerce(){
   const currentMonth=currentMonthOf('ECOM_DIARIO');
   const allMonthRows=(state.tables.ECOM_DIARIO||[]).filter(row=>!currentMonth||String(row.Mes??'')===currentMonth);
   const perDateMonth={};
-  allMonthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,target:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].target+=num(row,'Objetivo')});
+  allMonthRows.forEach(row=>{const date=normalizeDate(row.Fecha);if(!date)return;if(!perDateMonth[date])perDateMonth[date]={actual:0,target:0,visitas:0};perDateMonth[date].actual+=num(row,'Venta real');perDateMonth[date].target+=num(row,'Objetivo');perDateMonth[date].visitas+=num(row,'Visitas')});
   const loadedActual={},loadedTarget={};
   let ecomMonthTarget=0;
+  // Un día con visitas y venta $0 cuenta como cargado, igual que en loadedDates (ver storeProjection).
   Object.keys(perDateMonth).forEach(d=>{
     ecomMonthTarget+=perDateMonth[d].target;
-    if(perDateMonth[d].actual>0&&d<hoy){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}
+    if((perDateMonth[d].actual>0||perDateMonth[d].visitas>0)&&d<hoy){loadedActual[d]=perDateMonth[d].actual;loadedTarget[d]=perDateMonth[d].target}
   });
   const ritmoNecesario=diasRestantes?Math.max(0,ecomMonthTarget-a.actual)/diasRestantes:0;
   // "Cumplimiento a la fecha", no "Avance del mes": ratio compara contra a.target, que es el
