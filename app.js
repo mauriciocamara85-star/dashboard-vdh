@@ -1955,9 +1955,18 @@ function sortSellerDetail(list){
 // cubrió 2 locales en la misma semana quedaba con 2 filas separadas esa semana, cada una con una
 // porción de su venta/objetivo, y el conteo de semanas se inflaba de más (bug real: contaba semana
 // doble en vez de una sola vez evaluada contra su objetivo semanal completo).
+// Solo semanas CERRADAS (su último día ya pasó el corte de Evolución, ayer): la semana en curso
+// todavía no se ganó ni se perdió. Con "Todos los meses" cuenta todo el semestre. Antes tomaba el
+// mes vigente y el 02/11 todos daban "0 de 2" con Septiembre + Octubre elegidos: eran las dos
+// semanas de Noviembre, la del domingo 1° y la que arrancaba ese mismo día con venta $0.
 function weeklyComplianceByVendedor(month){
-  const local=$('localFilter').value;
-  const rawRows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>String(row.Mes??'')===month&&(local==='all'||String(row.Local??'')===local));
+  const local=$('localFilter').value,corte=corteEvolucion(),finDeSemana={};
+  [...(state.tables.LOCAL_DIARIO||[]),...(state.tables.VENDEDOR_DIARIO||[])].forEach(r=>{
+    const k=weekKeyOf(r),f=normalizeDate(r.Fecha);
+    if(f&&!(finDeSemana[k]>=f))finDeSemana[k]=f;
+  });
+  const cerrada=row=>{const fin=finDeSemana[weekKeyOf(row)];return!!fin&&fin<=corte};
+  const rawRows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>(month==='all'||String(row.Mes??'')===month)&&(local==='all'||String(row.Local??'')===local)&&cerrada(row));
   const groups={};
   fusionarVendedoresCompartidos(rawRows).forEach(row=>{
     const key=row.Vendedor,obj=num(row,'Venta obj');
@@ -2020,9 +2029,8 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;
   // "Semanas en objetivo" ignora el filtro de Semana a propósito (mismo criterio que "Cierre
   // Estimado" de Resumen General, que tampoco se achica con el filtro de fecha): la pregunta es
-  // "cómo viene en el mes", no "cómo vino esa semana puntual" — si Mes==='all' toma el mes vigente.
-  const complianceMonth=metricsMonth==='all'?currentMonthOf('VENDEDOR_SEMANAL'):metricsMonth;
-  const compliance=weeklyComplianceByVendedor(complianceMonth);
+  // "cómo viene en el mes", no "cómo vino esa semana puntual" — con "Todos los meses", el semestre.
+  const compliance=weeklyComplianceByVendedor(metricsMonth);
   // Campos derivados calculados una sola vez acá (no en cada celda ni en el comparador) para poder
   // ordenar por lo que el usuario realmente VE — el promedio de Conversión/Ticket/Prendas, no el
   // acumulador crudo que suman más arriba (sumar esos acumuladores entre vendedores con distinta
