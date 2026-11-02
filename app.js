@@ -1,7 +1,7 @@
 // Los datos salen directo del Sistema VDH (función ventas-tablero, 26/10/2026): las mismas tablas que armaba el
 // consolidador de Google con las planillas de los locales, ahora con lo que se carga en el sistema.
 const DATA_ENDPOINT='https://gfjdjupuwxohkgchqykx.supabase.co/functions/v1/ventas-tablero';
-const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta',comp:{modo:'none',desde:'',hasta:''}};
+const state={endpoint:DATA_ENDPOINT||localStorage.getItem('vdh-endpoint')||'',tables:{},view:'overview',timer:null,sort:{key:null,direction:1,table:null},rankScope:'sellers',sellerCategory:'liga',storeCategory:'constructores',rankSortMode:'units',storeTab:'resumen',sellerTab:'resumen',storeMetric:'venta',comp:{modo:'none',desde:'',hasta:''},metricsMeses:[]};
 const $=id=>document.getElementById(id);const q=sel=>document.querySelector(sel);const qa=sel=>[...document.querySelectorAll(sel)];
 // Librería chica de íconos SVG (trazo, currentColor — mismo lenguaje visual que ya usaba el botón
 // de refresh) para reemplazar los emoji de navegación/medallero por vectores consistentes en el
@@ -194,7 +194,7 @@ function semesterBounds(dateStr){
 // consolidador nunca depura, así que puede arrastrar vendedores/locales viejos que ya no están
 // cargados (ver memoria "vendedores fantasma en el filtro"). LOCAL_DIARIO+VENDEDOR_SEMANAL y
 // VENDEDOR_SEMANAL+VENDEDOR_DIARIO ya alcanzan para reflejar el roster real y vigente.
-function fillFilters(){const locals=[...new Set([...allRows('LOCAL_DIARIO'),...allRows('VENDEDOR_SEMANAL')].map(r=>r.Local).filter(Boolean))].sort();const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;$('localFilter').innerHTML=option('all','Todos los locales')+locals.map(x=>option(x,x)).join('');fillSellerFilter();fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter')}
+function fillFilters(){const locals=[...new Set([...allRows('LOCAL_DIARIO'),...allRows('VENDEDOR_SEMANAL')].map(r=>r.Local).filter(Boolean))].sort();const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;$('localFilter').innerHTML=option('all','Todos los locales')+locals.map(x=>option(x,x)).join('');fillSellerFilter();fillMetricsPeriod();fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter')}
 function fillSellerFilter(){const local=$('localFilter').value;const sellers=[...new Set([...allRows('VENDEDOR_SEMANAL'),...allRows('VENDEDOR_DIARIO')].filter(row=>local==='all'||String(row.Local??'')===local).map(r=>r.Vendedor).filter(Boolean))].sort();const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;const previous=$('sellerFilter').value;$('sellerFilter').innerHTML=option('all','Todos los vendedores')+sellers.map(x=>option(x,x)).join('');$('sellerFilter').value=sellers.includes(previous)?previous:'all'}
 function fillSellerWeeks(){const month=$('sellerMonthFilter').value;const weeks=[...new Set(allRows('VENDEDOR_SEMANAL').filter(row=>month==='all'||String(row.Mes??'')===month).map(row=>row.Semana).filter(v=>v!==undefined&&v!==null))].sort((a,b)=>Number(a)-Number(b));const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;$('sellerWeekFilter').innerHTML=option('all','Todas las semanas')+weeks.map(x=>option(x,`Semana ${x}`)).join('');}
 // Cartel de la derecha del título: qué período se está mirando, en dd/mm y con el nombre del preset
@@ -647,8 +647,10 @@ function renderStoreBreakdown(rows){
 // Conversión/Ticket objetivo son un valor mensual del LOCAL (no por vendedor, ver mapa de celdas del
 // Sheet), así que el objetivo de cada vendedor para el diagnóstico es el de SU local — se cruza contra
 // LOCAL_DIARIO filtrado por Local+Mes (no por Semana: es una constante mensual repetida por día).
+// month: un mes, 'all', o una función que dice qué meses entran (los tildados en Métricas vendedores).
 function localObjetivoFor(local,month){
-  const refRows=(state.tables.LOCAL_DIARIO||[]).filter(row=>String(row.Local??'')===String(local??'')&&(month==='all'||String(row.Mes??'')===month));
+  const incluyeMes=typeof month==='function'?month:mes=>month==='all'||String(mes??'')===month;
+  const refRows=(state.tables.LOCAL_DIARIO||[]).filter(row=>String(row.Local??'')===String(local??'')&&incluyeMes(row.Mes));
   // Se divide por la cantidad de días donde el objetivo realmente vino cargado, no por refRows.count
   // (todos los días del mes) — si algún día quedó sin esa columna cargada, dividir por el total de
   // días diluía el promedio por debajo del valor mensual real (bug real, auditoría 2026-09-05).
@@ -1925,6 +1927,50 @@ function renderSeason(){
 }
 function periodRows(table,monthId,weekId,fromId=null,toId=null){const month=$(monthId).value,week=$(weekId).value,from=fromId?$(fromId).value:'',to=toId?$(toId).value:'';return (state.tables[table]||[]).filter(row=>(month==='all'||String(row.Mes??'')===month)&&(week==='all'||String(row.Semana??'')===week)&&( $('localFilter').value==='all'||String(row.Local??'')===$('localFilter').value)&&( $('sellerFilter').value==='all'||String(row.Vendedor??'')===$('sellerFilter').value)&&(!from||normalizeDate(row.Fecha||row['Fecha foto'])>=from)&&(!to||normalizeDate(row.Fecha||row['Fecha foto'])<=to))}
 function fillPeriodFilters(monthId,weekId){const months=[...new Set(allRows('VENDEDOR_SEMANAL').map(row=>row.Mes).filter(Boolean))];const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;const previousMonth=$(monthId).value;$(monthId).innerHTML=option('all','Todos los meses')+months.map(x=>option(x,x)).join('');$(monthId).value=months.includes(previousMonth)?previousMonth:'all';const month=$(monthId).value;const weeks=[...new Set(allRows('VENDEDOR_SEMANAL').filter(row=>month==='all'||String(row.Mes??'')===month).map(row=>row.Semana).filter(v=>v!==undefined&&v!==null))].sort((a,b)=>Number(a)-Number(b));const previousWeek=$(weekId).value;$(weekId).innerHTML=option('all','Todas las semanas')+weeks.map(x=>option(x,`Semana ${x}`)).join('');$(weekId).value=weeks.map(String).includes(previousWeek)?previousWeek:'all'}
+// Mes de Métricas vendedores: casillas en vez de un <select>, para mirar varios meses juntos
+// ("Septiembre y Octubre, sin Noviembre", pedido 2026-11-02). state.metricsMeses vacío = todos.
+function mesesConDatosMetricas(){return[...new Set(allRows('VENDEDOR_SEMANAL').map(r=>String(r.Mes??'').trim()).filter(Boolean))].sort((a,b)=>MONTH_ORDER.indexOf(a)-MONTH_ORDER.indexOf(b))}
+function mesesMetricas(){const hay=mesesConDatosMetricas();return(state.metricsMeses||[]).filter(m=>hay.includes(m))}
+function mesEnMetricas(mes){const elegidos=mesesMetricas();return!elegidos.length||elegidos.includes(String(mes??'').trim())}
+function fillMetricsPeriod(){
+  const meses=mesesConDatosMetricas(),elegidos=mesesMetricas();
+  state.metricsMeses=elegidos.length===meses.length?[]:elegidos;   // todos tildados = "Todos los meses"
+  const todos=!state.metricsMeses.length;
+  const casilla=(valor,texto,tildada)=>`<label class="mes-opcion"><input type="checkbox" value="${escapeHtml(valor)}"${tildada?' checked':''}><span>${escapeHtml(texto)}</span></label>`;
+  $('metricsMonthList').innerHTML=casilla('all','Todos los meses',todos)+meses.map(m=>casilla(m,m,todos||state.metricsMeses.includes(m))).join('');
+  $('metricsMonthText').textContent=todos?'Todos los meses':state.metricsMeses.length<=2?state.metricsMeses.join(' y '):state.metricsMeses.map(m=>m.slice(0,3)).join(', ');
+  const option=(value,label)=>`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+  const weeks=[...new Set(allRows('VENDEDOR_SEMANAL').filter(row=>mesEnMetricas(row.Mes)).map(row=>String(row.Semana??'').trim()).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+  const previousWeek=$('metricsWeekFilter').value;
+  $('metricsWeekFilter').innerHTML=option('all','Todas las semanas')+weeks.map(x=>option(x,`Semana ${x}`)).join('');
+  $('metricsWeekFilter').value=weeks.includes(previousWeek)?previousWeek:'all';
+}
+function initMesesMetricas(){
+  const btn=$('metricsMonthBtn'),panel=$('metricsMonthDropdown');
+  const cerrar=()=>{panel.hidden=true;btn.setAttribute('aria-expanded','false')};
+  btn.addEventListener('click',()=>{const abrir=panel.hidden;panel.hidden=!abrir;btn.setAttribute('aria-expanded',String(abrir))});
+  $('metricsMonthList').addEventListener('change',e=>{
+    const caja=e.target;if(!caja.matches('input[type="checkbox"]'))return;
+    const meses=mesesConDatosMetricas();
+    let elegidos=state.metricsMeses.length?[...state.metricsMeses]:[...meses];
+    if(caja.value==='all')elegidos=[...meses];
+    else if(caja.checked)elegidos.push(caja.value);
+    else elegidos=elegidos.filter(m=>m!==caja.value);
+    if(!elegidos.length)elegidos=[caja.value];   // siempre queda al menos un mes tildado
+    state.metricsMeses=meses.filter(m=>elegidos.includes(m));
+    fillMetricsPeriod();render();
+  });
+  document.addEventListener('click',e=>{if(!$('metricsMonthLabel').contains(e.target))cerrar()});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')cerrar()});
+}
+// "Del 01/09 al 31/10" del badge de fechas: con varios meses, solo si son seguidos y se mira el mes
+// entero (si no, ya lo dice el botón de Mes).
+function rangoMesesMetricas(){
+  const week=$('metricsWeekFilter').value,rangos=mesesMetricas().map(m=>weekDateRange(m,week));
+  if(!rangos.length||!rangos.every(Boolean))return null;
+  if(rangos.length>1&&(week!=='all'||rangos.some((r,i)=>i&&r.start!==addDaysKey(rangos[i-1].end,1))))return null;
+  return{start:rangos[0].start,end:rangos[rangos.length-1].end};
+}
 // Detalle individual (Métricas vendedores): mismo mecanismo de header clickeable que ya usan las
 // tablas de Locales/E-commerce (state.sort + renderTable), portado a mano acá porque esta tabla no
 // sale de filas crudas del Sheet sino de `list` ya agregado por vendedor (Venta/Tráfico/Conversión
@@ -1959,14 +2005,15 @@ function sortSellerDetail(list){
 // todavía no se ganó ni se perdió. Con "Todos los meses" cuenta todo el semestre. Antes tomaba el
 // mes vigente y el 02/11 todos daban "0 de 2" con Septiembre + Octubre elegidos: eran las dos
 // semanas de Noviembre, la del domingo 1° y la que arrancaba ese mismo día con venta $0.
-function weeklyComplianceByVendedor(month){
+// incluyeMes: los meses tildados en el filtro Mes (ver mesEnMetricas).
+function weeklyComplianceByVendedor(incluyeMes){
   const local=$('localFilter').value,corte=corteEvolucion(),finDeSemana={};
   [...(state.tables.LOCAL_DIARIO||[]),...(state.tables.VENDEDOR_DIARIO||[])].forEach(r=>{
     const k=weekKeyOf(r),f=normalizeDate(r.Fecha);
     if(f&&!(finDeSemana[k]>=f))finDeSemana[k]=f;
   });
   const cerrada=row=>{const fin=finDeSemana[weekKeyOf(row)];return!!fin&&fin<=corte};
-  const rawRows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>(month==='all'||String(row.Mes??'')===month)&&(local==='all'||String(row.Local??'')===local)&&cerrada(row));
+  const rawRows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>incluyeMes(row.Mes)&&(local==='all'||String(row.Local??'')===local)&&cerrada(row));
   const groups={};
   fusionarVendedoresCompartidos(rawRows).forEach(row=>{
     const key=row.Vendedor,obj=num(row,'Venta obj');
@@ -1983,9 +2030,10 @@ function weeklyComplianceByVendedor(month){
 // sin esto, a mitad de semana se comparaban 2 días de gente contra 7 de objetivo y todos daban
 // "Tráfico ↓" (pedido 2026-10-07: Eve Poetto, 8 personas contra 49 el martes). El reparto por día del
 // objetivo de venta es el que ya carga la planilla, así que refleja qué días se espera más gente.
-// Semana cerrada = 1. Sin datos diarios = 1 (nunca se inventa un recorte).
-function fraccionSemanaTranscurrida(){
-  const avance=avanceDeSemanas(r=>`${r.Vendedor}|${r.Local}`,objectiveCutoff());
+// Semana cerrada = 1. Sin datos diarios = 1 (nunca se inventa un recorte). Corta en ayer, como
+// Evolución (corteEvolucion): el Período de arriba no se ve en Métricas y no tiene que influir acá.
+function fraccionSemanaTranscurrida(corte=corteEvolucion()){
+  const avance=avanceDeSemanas(r=>`${r.Vendedor}|${r.Local}`,corte);
   return(vendedor,local,weekKey)=>avance(`${vendedor}|${local}`,weekKey);
 }
 // Lo mismo con cualquier agrupación (claveDe arma la clave desde una fila de VENDEDOR_DIARIO):
@@ -2000,21 +2048,29 @@ function avanceDeSemanas(claveDe,corte){
   });
   return(clave,weekKey)=>{const e=acc[`${clave}|${weekKey}`];return e&&e.total>0?e.hasta/e.total:1};
 }
-function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metricsMonthFilter','metricsWeekFilter'),groups={};
-  const fraccionSemana=fraccionSemanaTranscurrida();
+function renderSellerMetrics(){
+  const metricsWeek=$('metricsWeekFilter').value,localElegido=$('localFilter').value,sellerElegido=$('sellerFilter').value,groups={};
+  const rows=(state.tables.VENDEDOR_SEMANAL||[]).filter(row=>mesEnMetricas(row.Mes)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek)&&(localElegido==='all'||String(row.Local??'')===localElegido)&&(sellerElegido==='all'||String(row.Vendedor??'')===sellerElegido));
+  // Venta y objetivo A LA FECHA (pedido 2026-11-02): de la semana en curso cuentan solo los días ya
+  // terminados, con el objetivo repartido por día (VENDEDOR_DIARIO) y sin la venta de hoy, igual que
+  // Evolución; la que todavía no empezó no entra. Antes sumaba el objetivo de la semana entera: con
+  // "Todos los meses", el lunes 02/11 Lautaro Ruibal daba 91,1% estando en 103,9% hasta el domingo.
+  const corte=corteEvolucion(),fraccionSemana=fraccionSemanaTranscurrida(corte),ventaDeHoy=ventaDespuesDelCorte(r=>`${r.Vendedor}|${r.Local}`,corte);
   // Por nombre solo (no Local+Vendedor): alguien que vende en dos locales quedaba partido en dos
   // filas de esta tabla, cada una con la mitad de su venta y objetivo, como si fueran dos personas
   // distintas — el nombre+apellido ya alcanza como identidad única (bug real reportado el
   // 2026-09-05). `locales` guarda los locales reales por separado (sin combinar todavía) para no
   // romper localObjetivoFor() más abajo, que necesita el nombre exacto de un local de LOCAL_DIARIO.
   rows.forEach(row=>{
-    const key=row.Vendedor;
+    const key=row.Vendedor,wk=weekKeyOf(row),f=fraccionSemana(row.Vendedor,row.Local,wk);
+    if(f<=0)return;   // semana que todavía no empezó
+    const venta=num(row,'Venta real')-ventaDeHoy(`${row.Vendedor}|${row.Local}`,wk);
     if(!groups[key])groups[key]={name:row.Vendedor,locales:new Set(),ventaPorLocal:{},sale:0,target:0,traffic:0,trafficTarget:0,pond:nuevoPonderado(),count:0};
     const group=groups[key];
     group.locales.add(row.Local);
-    group.ventaPorLocal[row.Local]=(group.ventaPorLocal[row.Local]||0)+num(row,'Venta real');
-    group.sale+=num(row,'Venta real');group.target+=num(row,'Venta obj');group.traffic+=num(row,'Tráfico real');
-    group.trafficTarget+=num(row,'Tráfico obj')*fraccionSemana(row.Vendedor,row.Local,weekKeyOf(row));
+    group.ventaPorLocal[row.Local]=(group.ventaPorLocal[row.Local]||0)+venta;
+    group.sale+=venta;group.target+=num(row,'Venta obj')*f;group.traffic+=num(row,'Tráfico real');
+    group.trafficTarget+=num(row,'Tráfico obj')*f;
     sumarPonderado(group.pond,num(row,'Venta real'),num(row,'TP real'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conv real'));
     // Conversión/TP/PxT se promedian SOLO sobre las semanas que tienen el dato cargado, no sobre
     // todas las filas del vendedor. VENDEDOR_SEMANAL trae una fila por CADA semana del semestre y
@@ -2026,11 +2082,10 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     // renderStores y que la propia planilla, que promedia con PROMEDIO() sobre las celdas cargadas.
     group.count++;
   });
-  const metricsMonth=$('metricsMonthFilter').value,metricsWeek=$('metricsWeekFilter').value;
   // "Semanas en objetivo" ignora el filtro de Semana a propósito (mismo criterio que "Cierre
   // Estimado" de Resumen General, que tampoco se achica con el filtro de fecha): la pregunta es
-  // "cómo viene en el mes", no "cómo vino esa semana puntual" — con "Todos los meses", el semestre.
-  const compliance=weeklyComplianceByVendedor(metricsMonth);
+  // "cómo viene en el mes", no "cómo vino esa semana puntual" — con varios meses tildados, todos ellos.
+  const compliance=weeklyComplianceByVendedor(mesEnMetricas);
   // Campos derivados calculados una sola vez acá (no en cada celda ni en el comparador) para poder
   // ordenar por lo que el usuario realmente VE — el promedio de Conversión/Ticket/Prendas, no el
   // acumulador crudo que suman más arriba (sumar esos acumuladores entre vendedores con distinta
@@ -2044,24 +2099,16 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
     return{...g,local,conversionAvg,ticketAvg,garmentsAvg,ratio,weeksMet:comp.met,weeksTotal:comp.total};
   });
   sortSellerDetail(list);
-  const daily=(state.tables.VENDEDOR_DIARIO||[]).filter(row=>rowMatchesFilters(row)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
-  // VENDEDOR_DIARIO no trae una columna de objetivo diario propia (buscaba 'Objetivo del día', que
-  // no existe en ninguna alias — daba siempre 0 y la card "Venta" de acá abajo nunca mostraba el %,
-  // bug real de la auditoría 2026-09-05). El objetivo diario de CADA vendedor se deriva igual que en
-  // sellerTargetForDay: su objetivo SEMANAL (VENDEDOR_SEMANAL) repartido entre los días de esa semana.
-  const dailyTotals=daily.reduce((acc,row)=>{
-    const weekLength=weekDates(row).length;
-    acc.actual+=num(row,'Venta real');
-    acc.target+=weekLength?sellerWeeklyTarget(row.Local,row.Mes,row.Semana,row.Vendedor)/weekLength:0;
-    return acc;
-  },{actual:0,target:0});
+  // La tarjeta "Venta" es el total de la tabla. Antes salía de VENDEDOR_DIARIO con el Período de
+  // arriba, que en esta pestaña está oculto: quedaba en el mes actual y Octubre daba $0 (2026-11-02).
+  const ventaTotal=list.reduce((s,r)=>s+r.sale,0),objetivoTotal=list.reduce((s,r)=>s+r.target,0);
   // Tráfico, Conversión, Ticket y PxT de las tarjetas (y del embudo y el diagnóstico): con "Todos
   // los vendedores" salen de la planilla del LOCAL (LOCAL_DIARIO, mismo Local/Mes/Semana), igual que
   // la sección Locales y que la propia planilla, que ya cierra con blueSoft. Lo que carga cada
   // vendedor no suma lo mismo: Rivadavia, Semana 1 de Octubre, daba 51 personas y $73.804 contra
   // 53 y $70.267 de la planilla (2026-10-07). Con un vendedor elegido no hay dato del local que le
   // corresponda: quedan los suyos, ponderados igual (totales primero, recién ahí se divide).
-  const filasLocal=$('sellerFilter').value!=='all'?[]:(state.tables.LOCAL_DIARIO||[]).filter(row=>($('localFilter').value==='all'||String(row.Local??'')===$('localFilter').value)&&(metricsMonth==='all'||String(row.Mes??'')===metricsMonth)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek));
+  const filasLocal=sellerElegido!=='all'?[]:(state.tables.LOCAL_DIARIO||[]).filter(row=>(localElegido==='all'||String(row.Local??'')===localElegido)&&mesEnMetricas(row.Mes)&&(metricsWeek==='all'||String(row.Semana??'')===metricsWeek)&&normalizeDate(row.Fecha)<=corte);
   const delLocal=filasLocal.length?cerrarPonderado(filasLocal.reduce((acc,row)=>sumarPonderado(acc,num(row,'Venta real'),num(row,'Ticket prom.'),num(row,'PxT real'),num(row,'Tráfico real'),convRate(row,'Conversión')),nuevoPonderado())):null;
   const totalPond=delLocal||cerrarPonderado(unirPonderados(list.map(row=>row.pond)));
   const totalTraffic=delLocal?delLocal.trafico:list.reduce((sum,row)=>sum+row.traffic,0);
@@ -2074,14 +2121,14 @@ function renderSellerMetrics(){const rows=periodRows('VENDEDOR_SEMANAL','metrics
   // de un local de LOCAL_DIARIO, un string combinado no matchea ninguno (bug real, auditoría
   // 2026-09-05).
   const localsPresent=[...new Set(list.flatMap(row=>[...row.locales]))];
-  const localObjs=localsPresent.map(local=>localObjetivoFor(local,metricsMonth));
+  const localObjs=localsPresent.map(local=>localObjetivoFor(local,mesEnMetricas));
   const avgConvObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.convObj,0)/localObjs.length:0;
   const avgTicketObj=localObjs.length?localObjs.reduce((sum,o)=>sum+o.ticketObj,0)/localObjs.length:0;
   const hasConvObj=avgConvObj>0,hasTicketObj=avgTicketObj>0;
-  $('sellerDetailMetrics').innerHTML=metricsCard('Vendedores visibles',number(list.length),'según filtros')+progressCard('Venta',money,dailyTotals.actual,dailyTotals.target,'según registros diarios')+metricsCard('Tráfico real',number(totalTraffic),fuenteTarjetas||'personas registradas')+metricsCard('Conversión media',percent(avgConv*100),hasConvObj?`${avgConv>=avgConvObj?'+':''}${percent((avgConv-avgConvObj)*100)} vs. objetivo (${percent(avgConvObj*100)})`:'conversión del período',hasConvObj?(avgConv>=avgConvObj?'good':'bad'):'')+metricsCard('Ticket promedio',money(avgTicket),hasTicketObj?`objetivo ${money(avgTicketObj)}`:(fuenteTarjetas||'promedio entre vendedores'),hasTicketObj?(avgTicket>=avgTicketObj?'good':'bad'):'')+metricsCard('Prendas por ticket',pxtTexto(avgGarments,1),fuenteTarjetas||'promedio entre vendedores');
+  $('sellerDetailMetrics').innerHTML=metricsCard('Vendedores visibles',number(list.length),'según filtros')+progressCard('Venta',money,ventaTotal,objetivoTotal,'sin objetivo a la fecha')+metricsCard('Tráfico real',number(totalTraffic),fuenteTarjetas||'personas registradas')+metricsCard('Conversión media',percent(avgConv*100),hasConvObj?`${avgConv>=avgConvObj?'+':''}${percent((avgConv-avgConvObj)*100)} vs. objetivo (${percent(avgConvObj*100)})`:'conversión del período',hasConvObj?(avgConv>=avgConvObj?'good':'bad'):'')+metricsCard('Ticket promedio',money(avgTicket),hasTicketObj?`objetivo ${money(avgTicketObj)}`:(fuenteTarjetas||'promedio entre vendedores'),hasTicketObj?(avgTicket>=avgTicketObj?'good':'bad'):'')+metricsCard('Prendas por ticket',pxtTexto(avgGarments,1),fuenteTarjetas||'promedio entre vendedores');
   renderTrafficFunnel('sellerFunnel',list.length>0,totalTraffic,avgConv);
   renderDiagnosisPanel('sellerDiagnosis',avgConv,avgConvObj,hasConvObj,avgTicket,avgTicketObj,hasTicketObj);
-  renderSellerFocus(list,metricsMonth);
+  renderSellerFocus(list,mesEnMetricas);
   // row.conversionAvg ya viene como fracción (convRate al sumar más arriba, promediada en el .map
   // de más arriba) — hay que *100 para mostrarlo como el resto del dashboard; antes se mostraba
   // crudo, mismo bug que dejaba "Conversión media" en 354% en la tarjeta de arriba (auditoría
@@ -3967,6 +4014,7 @@ function switchView(view){
   if($('compField')){$('compField').hidden=view!=='stores';if(view!=='stores')cerrarPanelComp()}
   if(hideDates){closePeriodDropdown();closeCalendarDropdown()}
   $('metricsMonthLabel').hidden=!isSellerMetrics;
+  if(!isSellerMetrics)$('metricsMonthDropdown').hidden=true;
   $('metricsWeekLabel').hidden=!isSellerMetrics;
   $('accessoryMonthLabel').hidden=!isAccessories;
   $('accessoryWeekLabel').hidden=!isAccessories;
@@ -3990,12 +4038,10 @@ function weekDateRange(month,week){
 }
 function updatePeriodRangeBadge(){
   const badge=$('periodRangeBadge');
-  let monthId,weekId;
-  if(state.view==='sellerMetrics'){monthId='metricsMonthFilter';weekId='metricsWeekFilter'}
-  else if(state.view==='accessories'){monthId='accessoryMonthFilter';weekId='accessoryWeekFilter'}
+  let range;
+  if(state.view==='sellerMetrics')range=rangoMesesMetricas();
+  else if(state.view==='accessories')range=weekDateRange($('accessoryMonthFilter').value,$('accessoryWeekFilter').value);
   else{badge.hidden=true;return}
-  const month=$(monthId).value,week=$(weekId).value;
-  const range=weekDateRange(month,week);
   if(!range){badge.hidden=true;return}
   badge.hidden=false;
   badge.innerHTML=`${icon('calendar','badge-icon')}Del ${formatDateAR(range.start)} al ${formatDateAR(range.end)}`;
@@ -4404,7 +4450,7 @@ if($('menuToggle'))$('menuToggle').addEventListener('click',()=>{
   aplicarMenu(oculto);
   try{localStorage.setItem('vdh-menu-oculto',oculto?'1':'0')}catch(e){}
 });
-applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{state.comp={modo:'none',desde:'',hasta:''};if($('compBtnText'))$('compBtnText').textContent='Sin comparar';['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();['metricsMonthFilter','accessoryMonthFilter'].forEach(id=>$(id).value='all');fillPeriodFilters('metricsMonthFilter','metricsWeekFilter');fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);[['metricsMonthFilter','metricsWeekFilter'],['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
+applyTheme(localStorage.getItem('vdh-theme')||'dark');qa('.theme-btn').forEach(btn=>btn.addEventListener('click',()=>applyTheme(btn.dataset.themeChoice)));$('refreshButton').addEventListener('click',loadData);$('clearFilters').addEventListener('click',()=>{state.comp={modo:'none',desde:'',hasta:''};if($('compBtnText'))$('compBtnText').textContent='Sin comparar';['localFilter','sellerFilter'].forEach(id=>$(id).value='all');fillSellerFilter();state.metricsMeses=[];$('accessoryMonthFilter').value='all';fillMetricsPeriod();fillPeriodFilters('accessoryMonthFilter','accessoryWeekFilter');['metricsWeekFilter','accessoryWeekFilter'].forEach(id=>$(id).value='all');resetPeriodPicker();render()});$('localFilter').addEventListener('change',()=>{fillSellerFilter();render()});$('sellerFilter').addEventListener('change',render);$('metricsWeekFilter').addEventListener('change',render);initMesesMetricas();[['accessoryMonthFilter','accessoryWeekFilter']].forEach(([month,week])=>{$(month).addEventListener('change',()=>{fillPeriodFilters(month,week);render()});$(week).addEventListener('change',render)});qa('.nav-item,.jump-view').forEach(button=>button.addEventListener('click',()=>switchView(button.dataset.view)));qa('#storeViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeTab=button.dataset.tab;applyStoreTab()}));qa('#storeKpiGrid .store-kpi-card').forEach(button=>button.addEventListener('click',()=>{state.storeMetric=button.dataset.storeMetric;renderStores()}));qa('#sellerViewTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerTab=button.dataset.tab;applySellerTab()}));qa('#rankScopeTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.rankScope=button.dataset.scope;renderRanking()}));qa('#sellerCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.sellerCategory=button.dataset.category;renderRanking()}));qa('#storeCatTabs .rank-tab').forEach(button=>button.addEventListener('click',()=>{state.storeCategory=button.dataset.storeCategory;renderRanking()}));qa('#rankSortToggle .rank-tab-sm').forEach(button=>button.addEventListener('click',()=>{state.rankSortMode=button.dataset.sort;renderRanking()}));qa('.filters input,.seller-period-filters input').forEach(control=>control.addEventListener('change',render));
 // ── BOTTOM NAV + DRAWER (mobile) ──────────────────────────────
 qa('.bottom-nav-item[data-view]').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 function openMainDrawer(){$('mainDrawerBackdrop').hidden=false;$('mainDrawerPanel').hidden=false;$('mainDrawerToggle').setAttribute('aria-expanded','true')}

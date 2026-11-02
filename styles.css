@@ -424,6 +424,14 @@ html[data-theme="light"] .rent-table th.rent-g-ventas,html[data-theme="light"] .
    que está siempre visible al lado — tenerlo repetido en esta lista no cumplía función. */
 .period-group-label{padding:10px 10px 2px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.4px}
 .period-preset-indent{padding-left:18px}
+/* Mes de Métricas vendedores: casillas para tildar varios meses (ver fillMetricsPeriod). Con
+   ".filters" adelante para ganarle a ".filters label" (grid) y ".filters input" (36px de alto). */
+.filters .mes-opcion{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-sm);color:var(--soft);font:600 12px var(--sans);cursor:pointer;transition:.15s}
+.filters .mes-opcion:hover{background:var(--ink)}
+.filters .mes-opcion:first-child{border-bottom:1px solid var(--line);border-radius:var(--radius-sm) var(--radius-sm) 0 0;margin-bottom:4px;padding-bottom:10px}
+html[data-theme="light"] .filters .mes-opcion{color:#1E3552}
+.filters .mes-opcion input{width:15px;height:15px;margin:0;padding:0;flex-shrink:0;accent-color:var(--coral);cursor:pointer}
+.mes-lista{display:flex;flex-direction:column;gap:1px}
 .period-calendar{display:flex;justify-content:center;padding-top:2px}
 /* El calendario de Flatpickr necesita ~308px de ancho fijo (7 columnas LUN-DOM) — el max-width:260px
    de .period-dropdown es para la LISTA de presets, no le entra al calendario y recortaba sábado/
